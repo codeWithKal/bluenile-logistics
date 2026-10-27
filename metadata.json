@@ -1,0 +1,8 @@
+{
+  "name": "Alex Logistics",
+  "description": "Alex Logistics unified sand and aggregate transportation management with hired truck trip registry, crusher loading dispatch, and delivery analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
