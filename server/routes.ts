@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { query, queryOne, execute, transaction, getCloudBackupDiagnostics, forceCloudBackupSync } from './db.ts';
+import { query, queryOne, execute, transaction, getCloudBackupDiagnostics, forceCloudBackupSync, listCloudBackups, restoreCloudBackup } from './db.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sandtrack-secret-key-2026-secure';
 
@@ -122,11 +122,82 @@ apiRouter.get('/system/cloud-backup', async (_req: Request, res: Response) => {
   }
 });
 
-// Force manual backup sync to Supabase bucket
-apiRouter.post('/system/cloud-backup/sync', async (_req: Request, res: Response) => {
+// List all historic dated backup files stored in the Supabase bucket
+apiRouter.get('/system/cloud-backups', async (_req: Request, res: Response) => {
   try {
-    const result = await forceCloudBackupSync();
+    const backups = await listCloudBackups();
+    res.json(backups);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Force manual backup sync to Supabase bucket (with optional timestamped snapshot)
+apiRouter.post('/system/cloud-backup/sync', async (req: Request, res: Response) => {
+  try {
+    const timestamped = req.body?.timestamped === true;
+    const result = await forceCloudBackupSync({ timestamped });
     res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Download a specific dated backup file directly
+apiRouter.get('/system/cloud-backups/download', async (req: Request, res: Response) => {
+  const fileName = String(req.query.file || '');
+  const cleanName = fileName.replace(/^backups\//, '').replace(/[^a-zA-Z0-9_.-]/g, '');
+  if (!cleanName.endsWith('.sqlite')) {
+    return res.status(400).json({ error: 'Invalid backup filename' });
+  }
+
+  const rawUrl = process.env.SUPABASE_URL?.trim().replace(/^["']|["']$/g, '').replace(/\/$/, '');
+  const rawKey = (process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)?.trim().replace(/^["']|["']$/g, '');
+  let bucket = (process.env.STORAGE_BUCKET || 'sandtrack-db').trim().replace(/^["']|["']$/g, '');
+  if (!bucket || bucket.startsWith('sb_') || bucket.startsWith('eyJ') || bucket.length > 30) {
+    bucket = 'sandtrack-db';
+  }
+
+  if (!rawUrl || !rawKey) {
+    return res.status(503).json({ error: 'Supabase cloud storage is not configured' });
+  }
+
+  try {
+    const fileUrl = `${rawUrl}/storage/v1/object/${bucket}/backups/${cleanName}`;
+    const upstreamRes = await fetch(fileUrl, {
+      headers: {
+        apikey: rawKey,
+        Authorization: `Bearer ${rawKey}`,
+      },
+    });
+
+    if (!upstreamRes.ok) {
+      return res.status(upstreamRes.status).json({ error: 'Failed to retrieve file from Supabase storage' });
+    }
+
+    const arrayBuffer = await upstreamRes.arrayBuffer();
+    res.setHeader('Content-Type', 'application/x-sqlite3');
+    res.setHeader('Content-Disposition', `attachment; filename="${cleanName}"`);
+    res.send(Buffer.from(arrayBuffer));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Restore database from a specific dated snapshot
+apiRouter.post('/system/cloud-backups/restore', async (req: Request, res: Response) => {
+  const fileName = String(req.body?.file || '');
+  if (!fileName) {
+    return res.status(400).json({ error: 'Backup filename is required' });
+  }
+
+  try {
+    const result = await restoreCloudBackup(fileName);
+    if (result.success) {
+      return res.json(result);
+    } else {
+      return res.status(400).json(result);
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
   }

@@ -17,6 +17,10 @@ import {
   RefreshCw,
   HardDrive,
   ExternalLink,
+  Download,
+  History,
+  Calendar,
+  RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
@@ -110,14 +114,31 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
     }
   };
 
+  // Historic Backups State
+  const [historicBackups, setHistoricBackups] = useState<any[]>([]);
+  const [loadingBackupsList, setLoadingBackupsList] = useState(false);
+  const [restoringFile, setRestoringFile] = useState<string | null>(null);
+
+  const fetchHistoricBackups = async () => {
+    setLoadingBackupsList(true);
+    try {
+      const list = await api.getCloudBackupsList();
+      setHistoricBackups(list);
+    } catch (err) {
+      console.error('Could not load historic backups:', err);
+    } finally {
+      setLoadingBackupsList(false);
+    }
+  };
+
   const handleManualSync = async () => {
     setSyncingBackup(true);
     setSyncFeedback(null);
     try {
-      const res = await api.syncCloudBackup();
+      const res = await api.syncCloudBackup(false);
       if (res.success) {
         setSyncFeedback({ text: res.message, isError: false });
-        await fetchBackupStatus();
+        await Promise.all([fetchBackupStatus(), fetchHistoricBackups()]);
       } else {
         setSyncFeedback({ text: res.message, isError: true });
       }
@@ -125,6 +146,49 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
       setSyncFeedback({ text: err.message || 'Sync failed', isError: true });
     } finally {
       setSyncingBackup(false);
+    }
+  };
+
+  const handleCreateTimestampedSnapshot = async () => {
+    setSyncingBackup(true);
+    setSyncFeedback(null);
+    try {
+      const res = await api.syncCloudBackup(true);
+      if (res.success) {
+        setSyncFeedback({ text: res.message, isError: false });
+        await Promise.all([fetchBackupStatus(), fetchHistoricBackups()]);
+      } else {
+        setSyncFeedback({ text: res.message, isError: true });
+      }
+    } catch (err: any) {
+      setSyncFeedback({ text: err.message || 'Snapshot creation failed', isError: true });
+    } finally {
+      setSyncingBackup(false);
+    }
+  };
+
+  const handleRestoreBackup = async (fileName: string) => {
+    const isConfirmed = window.confirm(
+      `Restore confirmation:\n\nAre you sure you want to restore the system database from "${fileName}"?\n\nThis will replace the current active SQLite database with this snapshot and refresh the application.`
+    );
+    if (!isConfirmed) return;
+
+    setRestoringFile(fileName);
+    setSyncFeedback(null);
+    try {
+      const res = await api.restoreCloudBackup(fileName);
+      if (res.success) {
+        setSyncFeedback({ text: `${res.message} Reloading application...`, isError: false });
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      } else {
+        setSyncFeedback({ text: res.message, isError: true });
+      }
+    } catch (err: any) {
+      setSyncFeedback({ text: err.message || 'Restore failed', isError: true });
+    } finally {
+      setRestoringFile(null);
     }
   };
 
@@ -363,6 +427,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             onClick={() => {
               setActiveTab('backup');
               fetchBackupStatus();
+              fetchHistoricBackups();
             }}
             className={`py-3 px-4 text-xs font-semibold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
               activeTab === 'backup'
@@ -717,10 +782,21 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                         type="button"
                         onClick={handleManualSync}
                         disabled={syncingBackup}
-                        className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${syncingBackup ? 'animate-spin' : ''}`} />
-                        <span>{syncingBackup ? 'Uploading to Supabase...' : 'Sync Database to Cloud Now'}</span>
+                        <span>{syncingBackup ? 'Syncing...' : 'Sync Database (Daily Snapshot)'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCreateTimestampedSnapshot}
+                        disabled={syncingBackup}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        title="Creates an immutable snapshot stamped with the current date & hour"
+                      >
+                        <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Create Timestamped Snapshot</span>
                       </button>
                     </div>
                   </div>
@@ -739,18 +815,112 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                 )}
               </div>
 
+              {/* Dated Cloud Backups & Historic Snapshots List */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <History className="w-4 h-4 text-amber-400" />
+                    <span className="font-bold text-slate-200">Dated Historic Snapshots</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                      {historicBackups.length} file{historicBackups.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchHistoricBackups}
+                    disabled={loadingBackupsList}
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+                    title="Refresh backups list"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingBackupsList ? 'animate-spin text-amber-400' : ''}`} />
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-400">
+                  Each day an automatic dated backup copy is saved in your Supabase bucket under <code className="text-amber-300 font-mono">backups/sand_logistics_YYYY-MM-DD.sqlite</code> alongside your live database.
+                </p>
+
+                {loadingBackupsList ? (
+                  <div className="py-4 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                    <span>Loading dated backups from bucket...</span>
+                  </div>
+                ) : historicBackups.length === 0 ? (
+                  <div className="py-4 text-center text-slate-500 text-xs border border-dashed border-slate-800 rounded-lg">
+                    No dated snapshots created yet. Click "Sync Database" or "Create Timestamped Snapshot" above to generate your first dated backup!
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {historicBackups.map((bk) => (
+                      <div
+                        key={bk.name}
+                        className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg flex items-center justify-between gap-3 text-xs hover:border-slate-700 transition-colors"
+                      >
+                        <div className="min-w-0 flex items-center gap-2.5">
+                          <Database className="w-4 h-4 text-amber-400 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="font-mono text-slate-200 font-medium truncate flex items-center gap-2">
+                              <span>{bk.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-sans">
+                                {bk.sizeKb} KB
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              {new Date(bk.updatedAt).toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {/* Direct Download Button */}
+                          <a
+                            href={`/api/system/cloud-backups/download?file=${encodeURIComponent(bk.name)}`}
+                            download={bk.name}
+                            className="p-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors flex items-center gap-1 text-[11px] cursor-pointer"
+                            title="Download SQLite file to your computer"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Download</span>
+                          </a>
+
+                          {/* Restore Snapshot Button */}
+                          {user.role === 'admin' && (
+                            <button
+                              type="button"
+                              onClick={() => handleRestoreBackup(bk.name)}
+                              disabled={restoringFile === bk.name}
+                              className="p-1.5 rounded-md bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-slate-950 transition-colors flex items-center gap-1 text-[11px] cursor-pointer disabled:opacity-50"
+                              title="Restore system database to this point in time"
+                            >
+                              <RotateCcw className={`w-3.5 h-3.5 ${restoringFile === bk.name ? 'animate-spin' : ''}`} />
+                              <span className="hidden sm:inline">
+                                {restoringFile === bk.name ? 'Restoring...' : 'Restore'}
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* How to verify in Supabase Dashboard */}
               <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800 text-[11px] space-y-2 text-slate-400">
                 <div className="font-semibold text-slate-200 flex items-center gap-1.5">
                   <HardDrive className="w-3.5 h-3.5 text-amber-400" />
-                  <span>How to verify in Supabase Console:</span>
+                  <span>File Storage Organization in Supabase:</span>
                 </div>
-                <ol className="list-decimal list-inside space-y-1 text-slate-300">
-                  <li>Log into <strong className="text-white">supabase.com/dashboard</strong> and open your project.</li>
-                  <li>Click <strong className="text-white">Storage</strong> in the left sidebar menu.</li>
-                  <li>Open the bucket named <strong className="text-amber-400">sandtrack-db</strong>.</li>
-                  <li>You will see <strong className="text-white">sand_logistics.sqlite</strong> with its file size and last modified timestamp.</li>
-                </ol>
+                <ul className="space-y-1.5 text-slate-300 font-mono text-[11px]">
+                  <li className="flex items-start gap-2">
+                    <span className="text-amber-400 font-bold">1. Live File:</span>
+                    <span><code className="text-white">sandtrack-db/sand_logistics.sqlite</code> (Active live database used by the app)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-amber-400 font-bold">2. Dated Backups:</span>
+                    <span><code className="text-white">sandtrack-db/backups/sand_logistics_YYYY-MM-DD.sqlite</code> (Daily historical snapshots)</span>
+                  </li>
+                </ul>
               </div>
 
               <div className="pt-2 border-t border-slate-800 flex justify-end">

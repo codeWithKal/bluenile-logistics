@@ -453,9 +453,28 @@ export const api = {
     return request<any>('/system/cloud-backup');
   },
 
-  async syncCloudBackup(): Promise<{ success: boolean; message: string; sizeBytes?: number }> {
-    return request<{ success: boolean; message: string; sizeBytes?: number }>('/system/cloud-backup/sync', {
+  async getCloudBackupsList(): Promise<Array<{
+    name: string;
+    path: string;
+    sizeBytes: number;
+    sizeKb: number;
+    updatedAt: string;
+    isDaily: boolean;
+  }>> {
+    return request<any[]>('/system/cloud-backups');
+  },
+
+  async syncCloudBackup(timestamped: boolean = false): Promise<{ success: boolean; message: string; sizeBytes?: number; snapshotName?: string }> {
+    return request<any>('/system/cloud-backup/sync', {
       method: 'POST',
+      body: JSON.stringify({ timestamped }),
+    });
+  },
+
+  async restoreCloudBackup(file: string): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>('/system/cloud-backups/restore', {
+      method: 'POST',
+      body: JSON.stringify({ file }),
     });
   },
 };

@@ -141,6 +141,24 @@ let lastBackupTime: string | null = null;
 let lastBackupStatus: 'success' | 'failed' | 'not_configured' = 'not_configured';
 let lastBackupError: string | null = null;
 let lastBackupSize: number | null = null;
+let lastDailyBackupDate: string | null = null;
+
+function getBackupTimestampString(date = new Date()): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}_${hh}-${min}-${ss}`;
+}
+
+function getTodayDateString(date = new Date()): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 let uploadTimeout: NodeJS.Timeout | null = null;
 function uploadCloudBackup() {
@@ -174,6 +192,27 @@ function uploadCloudBackup() {
         lastBackupSize = buffer.byteLength;
         lastBackupError = null;
         console.log(`[Supabase Cloud Backup] Successfully backed up SQLite database (${buffer.byteLength} bytes) to "${activeConfig.bucket}".`);
+
+        // Automatically create a daily dated snapshot if not created today yet
+        const today = getTodayDateString();
+        if (lastDailyBackupDate !== today) {
+          const dailyUrl = `${activeConfig.url}/storage/v1/object/${activeConfig.bucket}/backups/sand_logistics_${today}.sqlite`;
+          fetch(dailyUrl, {
+            method: 'POST',
+            headers: {
+              apikey: activeConfig.key,
+              Authorization: `Bearer ${activeConfig.key}`,
+              'x-upsert': 'true',
+              'Content-Type': 'application/x-sqlite3',
+            },
+            body: buffer,
+          }).then(r => {
+            if (r.ok) {
+              lastDailyBackupDate = today;
+              console.log(`[Supabase Cloud Backup] Automatically saved daily dated snapshot "backups/sand_logistics_${today}.sqlite".`);
+            }
+          }).catch(() => {});
+        }
       } else {
         const errText = await res.text().catch(() => '');
         lastBackupStatus = 'failed';
@@ -305,7 +344,12 @@ export async function getCloudBackupDiagnostics() {
   }
 }
 
-export async function forceCloudBackupSync(): Promise<{ success: boolean; message: string; sizeBytes?: number }> {
+export async function forceCloudBackupSync(options?: { timestamped?: boolean }): Promise<{
+  success: boolean;
+  message: string;
+  sizeBytes?: number;
+  snapshotName?: string;
+}> {
   const config = getSupabaseConfig();
   if (!config) {
     return {
@@ -320,9 +364,9 @@ export async function forceCloudBackupSync(): Promise<{ success: boolean; messag
   try {
     const data = db.export();
     const buffer = Buffer.from(data);
-    const url = `${config.url}/storage/v1/object/${config.bucket}/sand_logistics.sqlite`;
+    const primaryUrl = `${config.url}/storage/v1/object/${config.bucket}/sand_logistics.sqlite`;
 
-    const res = await fetch(url, {
+    const res = await fetch(primaryUrl, {
       method: 'POST',
       headers: {
         apikey: config.key,
@@ -338,10 +382,34 @@ export async function forceCloudBackupSync(): Promise<{ success: boolean; messag
       lastBackupStatus = 'success';
       lastBackupSize = buffer.byteLength;
       lastBackupError = null;
+
+      // Also create a dated backup file in the backups/ folder
+      const today = getTodayDateString();
+      const snapshotName = options?.timestamped
+        ? `sand_logistics_${getBackupTimestampString()}.sqlite`
+        : `sand_logistics_${today}.sqlite`;
+
+      const datedUrl = `${config.url}/storage/v1/object/${config.bucket}/backups/${snapshotName}`;
+      await fetch(datedUrl, {
+        method: 'POST',
+        headers: {
+          apikey: config.key,
+          Authorization: `Bearer ${config.key}`,
+          'x-upsert': 'true',
+          'Content-Type': 'application/x-sqlite3',
+        },
+        body: buffer,
+      }).catch((err) => {
+        console.warn('[Supabase Cloud Backup] Could not save dated backup copy:', err);
+      });
+
+      lastDailyBackupDate = today;
+
       return {
         success: true,
-        message: `Successfully uploaded ${buffer.byteLength} bytes to Supabase bucket "${config.bucket}".`,
-        sizeBytes: buffer.byteLength
+        message: `Successfully updated primary cloud database and saved dated backup "${snapshotName}" (${Math.round(buffer.byteLength / 1024)} KB).`,
+        sizeBytes: buffer.byteLength,
+        snapshotName
       };
     } else {
       const errText = await res.text().catch(() => '');
@@ -356,6 +424,111 @@ export async function forceCloudBackupSync(): Promise<{ success: boolean; messag
     lastBackupStatus = 'failed';
     lastBackupError = err.message || String(err);
     return { success: false, message: `Upload exception: ${err.message || String(err)}` };
+  }
+}
+
+export async function listCloudBackups(): Promise<Array<{
+  name: string;
+  path: string;
+  sizeBytes: number;
+  sizeKb: number;
+  updatedAt: string;
+  isDaily: boolean;
+}>> {
+  const config = getSupabaseConfig();
+  if (!config) return [];
+
+  try {
+    const listUrl = `${config.url}/storage/v1/object/list/${config.bucket}`;
+    const res = await fetch(listUrl, {
+      method: 'POST',
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prefix: 'backups',
+        limit: 100,
+        sortBy: { column: 'name', order: 'desc' }
+      }),
+    });
+
+    if (!res.ok) return [];
+
+    const data: any[] = await res.json().catch(() => []);
+    if (!Array.isArray(data)) return [];
+
+    return data
+      .filter(item => item.name && item.name.endsWith('.sqlite'))
+      .map(item => ({
+        name: item.name,
+        path: `backups/${item.name}`,
+        sizeBytes: item.metadata?.size || item.metadata?.contentLength || 0,
+        sizeKb: Math.round((item.metadata?.size || item.metadata?.contentLength || 0) / 1024),
+        updatedAt: item.updated_at || item.created_at || new Date().toISOString(),
+        isDaily: !item.name.includes('_') || item.name.split('_').length <= 3,
+      }));
+  } catch (err) {
+    console.warn('[Supabase Cloud Backup] Could not list historic backups:', err);
+    return [];
+  }
+}
+
+export async function restoreCloudBackup(backupName: string): Promise<{ success: boolean; message: string }> {
+  const config = getSupabaseConfig();
+  if (!config) return { success: false, message: 'Cloud storage is not configured.' };
+
+  const cleanName = backupName.replace(/^backups\//, '').replace(/[^a-zA-Z0-9_.-]/g, '');
+  if (!cleanName.endsWith('.sqlite')) {
+    return { success: false, message: 'Invalid backup file name.' };
+  }
+
+  try {
+    const downloadUrl = `${config.url}/storage/v1/object/${config.bucket}/backups/${cleanName}`;
+    const res = await fetch(downloadUrl, {
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+      },
+    });
+
+    if (!res.ok) {
+      return { success: false, message: `Failed to download backup: HTTP ${res.status}` };
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) {
+      return { success: false, message: 'Backup file is empty.' };
+    }
+
+    const buffer = Buffer.from(arrayBuffer);
+    fs.writeFileSync(DB_PATH, buffer);
+
+    if (SQL) {
+      db = new SQL.Database(buffer);
+    }
+
+    // Also update the primary sand_logistics.sqlite in Supabase so subsequent boots use this restored state
+    const primaryUrl = `${config.url}/storage/v1/object/${config.bucket}/sand_logistics.sqlite`;
+    await fetch(primaryUrl, {
+      method: 'POST',
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+        'x-upsert': 'true',
+        'Content-Type': 'application/x-sqlite3',
+      },
+      body: buffer,
+    }).catch(() => {});
+
+    console.log(`[Supabase Cloud Backup] Restored SQLite database from snapshot "${cleanName}".`);
+    return {
+      success: true,
+      message: `Database successfully restored from snapshot "${cleanName}" (${Math.round(buffer.byteLength / 1024)} KB).`
+    };
+  } catch (err: any) {
+    return { success: false, message: `Restore error: ${err.message || String(err)}` };
   }
 }
 
