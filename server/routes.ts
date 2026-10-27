@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { query, queryOne, execute, transaction } from './db.ts';
+import { query, queryOne, execute, transaction, getCloudBackupDiagnostics, forceCloudBackupSync } from './db.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sandtrack-secret-key-2026-secure';
 
@@ -106,6 +106,31 @@ export function recordAuditLog(
     console.error('Failed to write audit log:', err);
   }
 }
+
+// Lightweight public health check endpoint for uptime pingers & monitors
+apiRouter.get('/health', (_req: Request, res: Response) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
+});
+
+// Real-time Supabase persistent volume & SQLite backup diagnostics
+apiRouter.get('/system/cloud-backup', async (_req: Request, res: Response) => {
+  try {
+    const diagnostics = await getCloudBackupDiagnostics();
+    res.json(diagnostics);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Force manual backup sync to Supabase bucket
+apiRouter.post('/system/cloud-backup/sync', async (_req: Request, res: Response) => {
+  try {
+    const result = await forceCloudBackupSync();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
 
 // Apply auth parser across all API routes
 apiRouter.use(authenticate);

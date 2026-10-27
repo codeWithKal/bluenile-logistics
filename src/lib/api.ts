@@ -448,4 +448,14 @@ export const api = {
     });
     return request<TruckTransportPivotData>(`/reports/truck-transport-pivot?${params.toString()}`);
   },
+
+  async getCloudBackupStatus(): Promise<any> {
+    return request<any>('/system/cloud-backup');
+  },
+
+  async syncCloudBackup(): Promise<{ success: boolean; message: string; sizeBytes?: number }> {
+    return request<{ success: boolean; message: string; sizeBytes?: number }>('/system/cloud-backup/sync', {
+      method: 'POST',
+    });
+  },
 };

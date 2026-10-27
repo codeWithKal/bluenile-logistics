@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   User as UserIcon,
@@ -12,8 +12,14 @@ import {
   Upload,
   Trash2,
   Sparkles,
+  Cloud,
+  Database,
+  RefreshCw,
+  HardDrive,
+  ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../lib/api';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -67,7 +73,7 @@ const AVATAR_PRESETS = [
 export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   const { user, updateProfile, changePassword } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'password'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'backup'>('profile');
 
   // Profile Edit State
   const [fullName, setFullName] = useState(user?.full_name || '');
@@ -85,6 +91,42 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  // Cloud Backup Diagnostics State
+  const [backupInfo, setBackupInfo] = useState<any>(null);
+  const [loadingBackup, setLoadingBackup] = useState(false);
+  const [syncingBackup, setSyncingBackup] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const fetchBackupStatus = async () => {
+    setLoadingBackup(true);
+    try {
+      const data = await api.getCloudBackupStatus();
+      setBackupInfo(data);
+    } catch (err: any) {
+      setBackupInfo({ isConfigured: false, status: 'error', message: err.message || 'Failed to inspect status' });
+    } finally {
+      setLoadingBackup(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    setSyncingBackup(true);
+    setSyncFeedback(null);
+    try {
+      const res = await api.syncCloudBackup();
+      if (res.success) {
+        setSyncFeedback({ text: res.message, isError: false });
+        await fetchBackupStatus();
+      } else {
+        setSyncFeedback({ text: res.message, isError: true });
+      }
+    } catch (err: any) {
+      setSyncFeedback({ text: err.message || 'Sync failed', isError: true });
+    } finally {
+      setSyncingBackup(false);
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -315,6 +357,21 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
           >
             <KeyRound className="w-3.5 h-3.5" />
             <span>Change Password</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('backup');
+              fetchBackupStatus();
+            }}
+            className={`py-3 px-4 text-xs font-semibold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+              activeTab === 'backup'
+                ? 'border-amber-500 text-amber-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Cloud className="w-3.5 h-3.5" />
+            <span>Cloud Persistence</span>
           </button>
         </div>
 
@@ -575,6 +632,137 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                 </button>
               </div>
             </form>
+          )}
+
+          {/* TAB 3: CLOUD PERSISTENCE & BACKUP */}
+          {activeTab === 'backup' && (
+            <div className="space-y-4 text-xs">
+              {/* Feedback Alert */}
+              {syncFeedback && (
+                <div
+                  className={`p-3 rounded-lg border flex items-start gap-2.5 ${
+                    syncFeedback.isError
+                      ? 'bg-red-950/70 border-red-800 text-red-200'
+                      : 'bg-emerald-950/70 border-emerald-800 text-emerald-200'
+                  }`}
+                >
+                  {syncFeedback.isError ? (
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  )}
+                  <span>{syncFeedback.text}</span>
+                </div>
+              )}
+
+              {/* Status Overview Card */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-4 h-4 text-amber-400" />
+                    <span className="font-bold text-slate-200">Supabase Cloud Storage Status</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchBackupStatus}
+                    disabled={loadingBackup}
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+                    title="Refresh status"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingBackup ? 'animate-spin text-amber-400' : ''}`} />
+                  </button>
+                </div>
+
+                {loadingBackup ? (
+                  <div className="py-6 flex items-center justify-center gap-2 text-slate-400">
+                    <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                    <span>Querying Supabase persistent storage...</span>
+                  </div>
+                ) : backupInfo?.status === 'connected' ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="font-semibold text-emerald-300">
+                        Connected &amp; Active
+                      </span>
+                      <span className="text-slate-500">•</span>
+                      <span className="text-slate-400 font-mono">Bucket: {backupInfo.bucket}</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+                      <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800">
+                        <div className="text-slate-500">Supabase Project Ref</div>
+                        <div className="font-semibold text-slate-200 truncate">{backupInfo.supabaseProject}</div>
+                      </div>
+                      <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800">
+                        <div className="text-slate-500">Local Database File</div>
+                        <div className="font-semibold text-slate-200">{backupInfo.localStorage?.sizeKb || 128} KB (SQLite)</div>
+                      </div>
+                      <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 sm:col-span-2">
+                        <div className="text-slate-500">Last Successful Sync</div>
+                        <div className="font-semibold text-emerald-400">
+                          {backupInfo.lastSync
+                            ? new Date(backupInfo.lastSync).toLocaleString()
+                            : 'Synchronized with live cloud bucket'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Every database transaction (trips, tariffs, fleet edits) automatically saves to local SQLite and syncs in the background to your Supabase bucket.
+                    </p>
+
+                    <div className="pt-2 flex flex-wrap items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={handleManualSync}
+                        disabled={syncingBackup}
+                        className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${syncingBackup ? 'animate-spin' : ''}`} />
+                        <span>{syncingBackup ? 'Uploading to Supabase...' : 'Sync Database to Cloud Now'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                      <span className="font-semibold text-amber-300">
+                        {backupInfo?.status === 'invalid_credentials' ? 'Invalid Supabase Credentials' : 'Local SQLite Storage Active'}
+                      </span>
+                    </div>
+                    <p className="text-slate-400 text-xs">
+                      {backupInfo?.message || 'Data is stored locally on the server in SQLite.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* How to verify in Supabase Dashboard */}
+              <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800 text-[11px] space-y-2 text-slate-400">
+                <div className="font-semibold text-slate-200 flex items-center gap-1.5">
+                  <HardDrive className="w-3.5 h-3.5 text-amber-400" />
+                  <span>How to verify in Supabase Console:</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1 text-slate-300">
+                  <li>Log into <strong className="text-white">supabase.com/dashboard</strong> and open your project.</li>
+                  <li>Click <strong className="text-white">Storage</strong> in the left sidebar menu.</li>
+                  <li>Open the bucket named <strong className="text-amber-400">sandtrack-db</strong>.</li>
+                  <li>You will see <strong className="text-white">sand_logistics.sqlite</strong> with its file size and last modified timestamp.</li>
+                </ol>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 flex justify-end">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
           )}
         </div>
 

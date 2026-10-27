@@ -34,9 +34,14 @@ function getSupabaseConfig(): SupabaseConfig | null {
   // Trim and strip accidental surrounding quotes
   const url = rawUrl.trim().replace(/^["']|["']$/g, '').replace(/\/$/, '');
   const key = rawKey.trim().replace(/^["']|["']$/g, '');
-  const bucket = rawBucket.trim().replace(/^["']|["']$/g, '');
+  let bucket = rawBucket.trim().replace(/^["']|["']$/g, '');
 
-  if (!url || !key || !bucket) return null;
+  // If user accidentally put their key in STORAGE_BUCKET, auto-fallback to 'sandtrack-db'
+  if (!bucket || bucket.startsWith('sb_') || bucket.startsWith('eyJ') || bucket.length > 30) {
+    bucket = 'sandtrack-db';
+  }
+
+  if (!url || !key) return null;
 
   // Check for placeholder URLs
   if (
@@ -58,7 +63,7 @@ function getSupabaseConfig(): SupabaseConfig | null {
     key.includes('your-service-role') ||
     key.includes('MY_SUPABASE') ||
     key.includes('placeholder') ||
-    key.length < 25
+    key.length < 20
   ) {
     if (!supabaseWarningLogged) {
       console.log('[Supabase Cloud Backup] Placeholder SUPABASE_KEY detected. Running in local SQLite mode.');
@@ -68,14 +73,17 @@ function getSupabaseConfig(): SupabaseConfig | null {
     return null;
   }
 
-  // Supabase JWT keys (anon/service_role) must follow Compact JWS format: 3 base64 segments separated by dots
-  // Alternatively, Supabase personal access tokens start with 'sbp_'
+  // Supabase keys can be:
+  // 1. Standard Compact JWS JWTs (3 segments separated by dots)
+  // 2. Personal access tokens ('sbp_...')
+  // 3. New Supabase secret tokens ('sb_secret_...' or 'sb_...')
   const isJwt = key.split('.').length === 3;
   const isPersonalToken = key.startsWith('sbp_');
+  const isSbSecret = key.startsWith('sb_secret_') || key.startsWith('sb_');
 
-  if (!isJwt && !isPersonalToken) {
+  if (!isJwt && !isPersonalToken && !isSbSecret) {
     if (!supabaseWarningLogged) {
-      console.log('[Supabase Cloud Backup] SUPABASE_KEY is not a valid Compact JWS JWT or token. Running in local SQLite mode.');
+      console.log('[Supabase Cloud Backup] SUPABASE_KEY is not a valid Supabase key or token. Running in local SQLite mode.');
       supabaseWarningLogged = true;
     }
     supabaseSyncDisabled = true;
@@ -129,6 +137,11 @@ async function downloadCloudBackup(): Promise<boolean> {
   return false;
 }
 
+let lastBackupTime: string | null = null;
+let lastBackupStatus: 'success' | 'failed' | 'not_configured' = 'not_configured';
+let lastBackupError: string | null = null;
+let lastBackupSize: number | null = null;
+
 let uploadTimeout: NodeJS.Timeout | null = null;
 function uploadCloudBackup() {
   const config = getSupabaseConfig();
@@ -156,9 +169,15 @@ function uploadCloudBackup() {
       });
 
       if (res.ok) {
-        console.log(`[Supabase Cloud Backup] Successfully backed up SQLite database to "${activeConfig.bucket}".`);
+        lastBackupTime = new Date().toISOString();
+        lastBackupStatus = 'success';
+        lastBackupSize = buffer.byteLength;
+        lastBackupError = null;
+        console.log(`[Supabase Cloud Backup] Successfully backed up SQLite database (${buffer.byteLength} bytes) to "${activeConfig.bucket}".`);
       } else {
         const errText = await res.text().catch(() => '');
+        lastBackupStatus = 'failed';
+        lastBackupError = `HTTP ${res.status}: ${errText}`;
         if (res.status === 400 || res.status === 401 || res.status === 403) {
           console.warn(`[Supabase Cloud Backup] Supabase rejected credentials (HTTP ${res.status}: ${errText}). Disabling cloud backup. Running safely in local SQLite mode.`);
           supabaseSyncDisabled = true;
@@ -166,10 +185,178 @@ function uploadCloudBackup() {
           console.warn(`[Supabase Cloud Backup] Upload returned HTTP ${res.status}: ${errText}`);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
+      lastBackupStatus = 'failed';
+      lastBackupError = err.message || String(err);
       console.warn('[Supabase Cloud Backup] Failed to upload database backup:', err);
     }
   }, 1000);
+}
+
+export async function getCloudBackupDiagnostics() {
+  const rawUrl = process.env.SUPABASE_URL;
+  const rawKey = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const rawBucket = process.env.STORAGE_BUCKET || 'sandtrack-db';
+  let bucket = rawBucket.trim().replace(/^["']|["']$/g, '');
+  if (!bucket || bucket.startsWith('sb_') || bucket.startsWith('eyJ') || bucket.length > 30) {
+    bucket = 'sandtrack-db';
+  }
+
+  const localFileExists = fs.existsSync(DB_PATH);
+  const localFileSize = localFileExists ? fs.statSync(DB_PATH).size : 0;
+
+  if (!rawUrl || !rawKey) {
+    return {
+      isConfigured: false,
+      status: 'unconfigured',
+      message: 'Supabase credentials are not set in environment variables. SandTrack is storing data locally in SQLite.',
+      bucket,
+      localStorage: {
+        path: DB_PATH,
+        exists: localFileExists,
+        sizeBytes: localFileSize,
+        sizeKb: Math.round(localFileSize / 1024),
+      },
+      lastSync: lastBackupTime,
+      lastSyncStatus: lastBackupStatus,
+      lastError: lastBackupError,
+    };
+  }
+
+  const config = getSupabaseConfig();
+  if (!config) {
+    return {
+      isConfigured: false,
+      status: 'invalid_credentials',
+      message: 'Supabase environment variables contain placeholder values or an invalid JWT token. Running with local SQLite.',
+      bucket: rawBucket,
+      localStorage: {
+        path: DB_PATH,
+        exists: localFileExists,
+        sizeBytes: localFileSize,
+        sizeKb: Math.round(localFileSize / 1024),
+      },
+      lastSync: lastBackupTime,
+      lastSyncStatus: lastBackupStatus,
+      lastError: lastBackupError,
+    };
+  }
+
+  // Ping Supabase to verify live bucket access
+  try {
+    const bucketUrl = `${config.url}/storage/v1/bucket/${config.bucket}`;
+    const res = await fetch(bucketUrl, {
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+      },
+    });
+
+    if (res.ok) {
+      return {
+        isConfigured: true,
+        status: 'connected',
+        message: `Successfully connected to Supabase storage bucket "${config.bucket}". Persistent backup is active.`,
+        bucket: config.bucket,
+        supabaseProject: config.url.replace(/^https?:\/\//, '').split('.')[0],
+        localStorage: {
+          path: DB_PATH,
+          exists: localFileExists,
+          sizeBytes: localFileSize,
+          sizeKb: Math.round(localFileSize / 1024),
+        },
+        lastSync: lastBackupTime,
+        lastSyncStatus: lastBackupStatus === 'not_configured' ? 'connected_ready' : lastBackupStatus,
+        lastBackupSizeBytes: lastBackupSize,
+        lastError: lastBackupError,
+      };
+    } else {
+      const errText = await res.text().catch(() => '');
+      return {
+        isConfigured: true,
+        status: 'auth_error',
+        message: `Supabase returned HTTP ${res.status}: ${errText}`,
+        bucket: config.bucket,
+        localStorage: {
+          path: DB_PATH,
+          exists: localFileExists,
+          sizeBytes: localFileSize,
+        },
+        lastSync: lastBackupTime,
+        lastSyncStatus: 'failed',
+        lastError: `HTTP ${res.status}: ${errText}`,
+      };
+    }
+  } catch (err: any) {
+    return {
+      isConfigured: true,
+      status: 'network_error',
+      message: `Could not reach Supabase endpoint: ${err.message || String(err)}`,
+      bucket: config.bucket,
+      localStorage: {
+        path: DB_PATH,
+        exists: localFileExists,
+        sizeBytes: localFileSize,
+      },
+      lastSync: lastBackupTime,
+      lastSyncStatus: 'failed',
+      lastError: err.message || String(err),
+    };
+  }
+}
+
+export async function forceCloudBackupSync(): Promise<{ success: boolean; message: string; sizeBytes?: number }> {
+  const config = getSupabaseConfig();
+  if (!config) {
+    return {
+      success: false,
+      message: 'Cloud backup is not configured or credentials are placeholder/invalid.'
+    };
+  }
+  if (!db) {
+    return { success: false, message: 'Database is not initialized yet.' };
+  }
+
+  try {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    const url = `${config.url}/storage/v1/object/${config.bucket}/sand_logistics.sqlite`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+        'x-upsert': 'true',
+        'Content-Type': 'application/x-sqlite3',
+      },
+      body: buffer,
+    });
+
+    if (res.ok) {
+      lastBackupTime = new Date().toISOString();
+      lastBackupStatus = 'success';
+      lastBackupSize = buffer.byteLength;
+      lastBackupError = null;
+      return {
+        success: true,
+        message: `Successfully uploaded ${buffer.byteLength} bytes to Supabase bucket "${config.bucket}".`,
+        sizeBytes: buffer.byteLength
+      };
+    } else {
+      const errText = await res.text().catch(() => '');
+      lastBackupStatus = 'failed';
+      lastBackupError = `HTTP ${res.status}: ${errText}`;
+      return {
+        success: false,
+        message: `Supabase backup upload failed (HTTP ${res.status}): ${errText}`
+      };
+    }
+  } catch (err: any) {
+    lastBackupStatus = 'failed';
+    lastBackupError = err.message || String(err);
+    return { success: false, message: `Upload exception: ${err.message || String(err)}` };
+  }
 }
 
 let SQL: SqlJsStatic;
