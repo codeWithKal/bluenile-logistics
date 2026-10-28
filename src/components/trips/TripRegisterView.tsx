@@ -11,7 +11,8 @@ import {
   Phone,
   PhoneCall,
   ShieldCheck,
-  FileBarChart2
+  FileBarChart2,
+  Trash2
 } from 'lucide-react';
 import { Trip, Truck, ConstructionCompany, Location, TripStatus } from '../../types';
 import { api } from '../../lib/api';
@@ -181,6 +182,21 @@ export const TripRegisterView: React.FC<TripRegisterViewProps> = ({ onNavigateTo
       ],
       trips
     );
+  };
+
+  const handleDeleteTrip = async (trip: Trip) => {
+    if (!window.confirm(`Are you sure you want to permanently delete trip record ${trip.id} for truck ${trip.truck_plate} (${trip.sand_type}, ${trip.quantity_loaded_m3} m³)?`)) {
+      return;
+    }
+    try {
+      await api.deleteTrip(trip.id);
+      if (viewingTripId === trip.id) {
+        setViewingTripId(null);
+      }
+      loadTrips();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete trip record');
+    }
   };
 
   const getStatusBadge = (st: TripStatus) => {
@@ -545,17 +561,27 @@ export const TripRegisterView: React.FC<TripRegisterViewProps> = ({ onNavigateTo
                           <Eye className="w-3.5 h-3.5" />
                         </button>
                         {canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingTrip(t);
-                              setIsFormOpen(true);
-                            }}
-                            className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
-                            title="Edit Trip Details"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTrip(t);
+                                setIsFormOpen(true);
+                              }}
+                              className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+                              title="Edit Trip Details"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTrip(t)}
+                              className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                              title="Delete Trip Record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -623,6 +649,9 @@ export const TripRegisterView: React.FC<TripRegisterViewProps> = ({ onNavigateTo
           setIsFormOpen(true);
         }}
         onStatusUpdated={() => {
+          loadTrips();
+        }}
+        onTripDeleted={() => {
           loadTrips();
         }}
         onViewTruckDossier={(trkId) => {

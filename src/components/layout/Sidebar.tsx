@@ -46,13 +46,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems = [
     { id: 'dashboard' as ActiveTab, label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'trips' as ActiveTab, label: 'Trip Register', icon: ClipboardList, badge: 'Unified' },
-    { id: 'tariffs' as ActiveTab, label: 'Route Tariffs & Fees', icon: Route, badge: 'Fixed Fees' },
+    { id: 'trips' as ActiveTab, label: 'Trip Register', icon: ClipboardList },
+    { id: 'tariffs' as ActiveTab, label: 'Route Tariffs & Fees', icon: Route },
     { id: 'trucks' as ActiveTab, label: 'Hired Trucks', icon: Truck },
     { id: 'companies' as ActiveTab, label: 'Construction Companies', icon: Building2 },
     { id: 'projects' as ActiveTab, label: 'Destination Projects', icon: FolderGit2 },
-    { id: 'locations' as ActiveTab, label: 'Crusher Plants', icon: Factory, badge: 'Loading Only' },
-    { id: 'reports' as ActiveTab, label: 'Reports & Export', icon: FileBarChart, badge: 'Financial' },
+    { id: 'locations' as ActiveTab, label: 'Crusher Plants', icon: Factory },
+    { id: 'reports' as ActiveTab, label: 'Reports & Export', icon: FileBarChart },
     ...(isAdmin ? [{ id: 'users' as ActiveTab, label: 'Users & Roles', icon: Users }] : []),
   ];
 
@@ -114,15 +114,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />
                   <span className="truncate">{item.label}</span>
                 </div>
-                {item.badge && (
-                  <span
-                    className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded shrink-0 ${
-                      isActive ? 'bg-amber-600/30 text-slate-950' : 'bg-slate-800 text-slate-400'
-                    }`}
-                  >
-                    {item.badge}
-                  </span>
-                )}
               </button>
             );
           })}

@@ -190,6 +190,12 @@ export const api = {
     return request<{ truck: Truck; trips: Trip[] }>(`/trucks/${id}/history`);
   },
 
+  async deleteTruck(id: string, force: boolean = false): Promise<{ success: boolean; message: string; id: string }> {
+    return request<{ success: boolean; message: string; id: string }>(`/trucks/${id}${force ? '?force=true' : ''}`, {
+      method: 'DELETE',
+    });
+  },
+
   // Companies
   async getCompanies(): Promise<ConstructionCompany[]> {
     return request<ConstructionCompany[]>('/companies');
@@ -206,6 +212,12 @@ export const api = {
     return request<{ success: boolean }>(`/companies/${id}`, {
       method: 'PUT',
       body: JSON.stringify(comp),
+    });
+  },
+
+  async deleteCompany(id: string, force: boolean = false): Promise<{ success: boolean; message: string; id: string }> {
+    return request<{ success: boolean; message: string; id: string }>(`/companies/${id}${force ? '?force=true' : ''}`, {
+      method: 'DELETE',
     });
   },
 
@@ -237,6 +249,12 @@ export const api = {
     });
   },
 
+  async deleteProject(id: string, force: boolean = false): Promise<{ success: boolean; message: string; id: string }> {
+    return request<{ success: boolean; message: string; id: string }>(`/projects/${id}${force ? '?force=true' : ''}`, {
+      method: 'DELETE',
+    });
+  },
+
   // Locations
   async getLocations(type?: 'Loading' | 'Unloading', activeOnly: boolean = false): Promise<Location[]> {
     const params = new URLSearchParams();
@@ -264,6 +282,12 @@ export const api = {
     });
   },
 
+  async deleteLocation(id: string, force: boolean = false): Promise<{ success: boolean; message: string; id: string }> {
+    return request<{ success: boolean; message: string; id: string }>(`/locations/${id}${force ? '?force=true' : ''}`, {
+      method: 'DELETE',
+    });
+  },
+
   // Route Transport Tariffs (Fixed Route Transport Fees)
   async getRouteTariffs(): Promise<RouteTariff[]> {
     return request<RouteTariff[]>('/route-tariffs');
@@ -286,6 +310,12 @@ export const api = {
     return request(`/route-tariffs/${id}`, {
       method: 'PUT',
       body: JSON.stringify(tariff),
+    });
+  },
+
+  async deleteRouteTariff(id: string): Promise<{ success: boolean; message: string; id: string }> {
+    return request<{ success: boolean; message: string; id: string }>(`/route-tariffs/${id}`, {
+      method: 'DELETE',
     });
   },
 
@@ -330,6 +360,12 @@ export const api = {
     return request<Trip>(`/trips/${id}`, {
       method: 'PUT',
       body: JSON.stringify(tripData),
+    });
+  },
+
+  async deleteTrip(id: string): Promise<{ success: boolean; message: string; id: string }> {
+    return request<{ success: boolean; message: string; id: string }>(`/trips/${id}`, {
+      method: 'DELETE',
     });
   },
 

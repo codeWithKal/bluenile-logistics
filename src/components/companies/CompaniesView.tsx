@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, Plus, Search, Edit, FileBarChart2, Phone, PhoneCall } from 'lucide-react';
+import { Building2, Plus, Search, Edit, FileBarChart2, Phone, PhoneCall, Trash2 } from 'lucide-react';
 import { ConstructionCompany } from '../../types';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -99,6 +99,33 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ onNavigateToCompan
     }
   };
 
+  const handleDeleteCompany = async (company: ConstructionCompany, force: boolean = false) => {
+    const confirmMsg = force
+      ? `Warning: Company "${company.name}" has associated project(s) and trip(s). Force delete will permanently erase this company, its projects, and its trips. Proceed with force delete?`
+      : `Are you sure you want to delete construction company "${company.name}"?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsSubmitting(true);
+    try {
+      await api.deleteCompany(company.id, force);
+      if (isModalOpen && editingComp?.id === company.id) {
+        setIsModalOpen(false);
+      }
+      loadCompanies();
+    } catch (err: any) {
+      if (err.data?.canForce) {
+        if (window.confirm(`${err.message}\n\nDo you want to permanently force-delete company "${company.name}" along with its ${err.data.projectCount || 0} project(s) and ${err.data.tripCount || 0} trip(s)?`)) {
+          handleDeleteCompany(company, true);
+          return;
+        }
+      } else {
+        alert(err.message || 'Failed to delete company');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const filtered = companies.filter((c) =>
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.contact_person && c.contact_person.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -184,13 +211,22 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ onNavigateToCompan
                       {c.is_active === 1 ? 'Active' : 'Inactive'}
                     </span>
                     {canEdit && (
-                      <button
-                        onClick={() => openEditModal(c)}
-                        className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
-                        title="Edit Company"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </button>
+                      <>
+                        <button
+                          onClick={() => openEditModal(c)}
+                          className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                          title="Edit Company"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCompany(c)}
+                          className="p-1 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                          title="Delete Company"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -358,21 +394,36 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ onNavigateToCompan
                   <span>Active Client Company</span>
                 </label>
               )}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-3 py-1.5 text-slate-600 hover:text-slate-900 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-1.5 font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded cursor-pointer"
-                >
-                  {isSubmitting ? 'Saving...' : editingComp ? 'Update Company' : 'Save Company'}
-                </button>
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div>
+                  {editingComp && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCompany(editingComp)}
+                      disabled={isSubmitting}
+                      className="px-3 py-1.5 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded border border-red-200 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Company</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-3 py-1.5 text-slate-600 hover:text-slate-900 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-4 py-1.5 font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded cursor-pointer"
+                  >
+                    {isSubmitting ? 'Saving...' : editingComp ? 'Update Company' : 'Save Company'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

@@ -422,22 +422,24 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             <KeyRound className="w-3.5 h-3.5" />
             <span>Change Password</span>
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('backup');
-              fetchBackupStatus();
-              fetchHistoricBackups();
-            }}
-            className={`py-3 px-4 text-xs font-semibold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
-              activeTab === 'backup'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Cloud className="w-3.5 h-3.5" />
-            <span>Cloud Persistence</span>
-          </button>
+          {user.role === 'admin' && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('backup');
+                fetchBackupStatus();
+                fetchHistoricBackups();
+              }}
+              className={`py-3 px-4 text-xs font-semibold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+                activeTab === 'backup'
+                  ? 'border-amber-500 text-amber-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Cloud Persistence</span>
+            </button>
+          )}
         </div>
 
         {/* Tab Contents */}
@@ -699,8 +701,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             </form>
           )}
 
-          {/* TAB 3: CLOUD PERSISTENCE & BACKUP */}
-          {activeTab === 'backup' && (
+          {/* TAB 3: CLOUD PERSISTENCE & BACKUP (Admin Only) */}
+          {activeTab === 'backup' && user.role === 'admin' && (
             <div className="space-y-4 text-xs">
               {/* Feedback Alert */}
               {syncFeedback && (

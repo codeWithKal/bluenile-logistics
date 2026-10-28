@@ -133,43 +133,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Hero Operational Banner */}
-      <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-slate-900 text-white p-5 sm:p-6 shadow-xs">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs font-mono text-amber-400 font-semibold tracking-wider">
-              <span>UNIFIED LOGISTICS OPS</span>
-              <span aria-hidden="true">•</span>
-              <span>INDEPENDENT FLEET COORDINATION</span>
-            </div>
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-              Sand Haulage Dispatch &amp; Delivery Matrix
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              Consolidated tracking of sand types <span className="font-mono text-amber-300 font-bold">00</span>,{' '}
-              <span className="font-mono text-amber-300 font-bold">01</span>, and{' '}
-              <span className="font-mono text-amber-300 font-bold">02</span> in cubic meters (m³). Loading and unloading unified in one record.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              onClick={() => setShowSandInfoModal(true)}
-              className="px-3.5 py-2 text-xs font-semibold text-slate-200 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded transition-colors flex items-center gap-2 cursor-pointer"
-            >
-              <Info className="w-4 h-4 text-amber-400" />
-              <span>Sand Grade Specs</span>
-            </button>
-            <button
-              onClick={loadDashboard}
-              className="p-2 text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded transition-colors cursor-pointer"
-              title="Refresh Analytics"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Real-Time Operational Shift Summary Widget */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 text-white rounded-xl border border-slate-800 shadow-md p-5 space-y-4">
         {/* Widget Header & Live Pulse Strip */}
@@ -196,7 +159,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+            <button
+              onClick={() => setShowSandInfoModal(true)}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Info className="w-3.5 h-3.5 text-amber-400" />
+              <span>Sand Grade Specs</span>
+            </button>
+            <button
+              onClick={loadDashboard}
+              className="p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer"
+              title="Refresh Analytics"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
             <button
               onClick={() => onNavigateToTrips({ start_date: today?.date, end_date: today?.date })}
               className="text-xs font-mono font-bold text-amber-400 hover:text-amber-300 hover:bg-slate-800 px-3 py-1.5 rounded-lg border border-amber-500/30 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
@@ -468,89 +445,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <option value="Registered">Registered</option>
               <option value="Cancelled">Cancelled</option>
             </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Top Financial Summary Section (At the top of reports) */}
-      <div className="bg-slate-900 text-white p-5 rounded-xl border border-slate-800 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-500/20 text-amber-400 rounded-lg">
-              <DollarSign className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold font-mono uppercase tracking-wider text-white">
-                Executive Financial &amp; Transport Summary (ETB)
-              </h3>
-              <p className="text-xs text-slate-400">
-                Sand Sales Revenue • Crusher Cost • Fixed Route Transport Fees • Operating Gross Profit
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={() => onNavigateToReports('truck_transport_pivot')}
-              className="text-xs font-mono font-bold text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
-            >
-              Hired Trucks &amp; Fees Pivot →
-            </button>
-            <button
-              onClick={() => onNavigateToReports('financial')}
-              className="text-xs font-mono font-semibold text-amber-400 hover:text-amber-300 underline cursor-pointer"
-            >
-              Financial Tariffs Report →
-            </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="bg-slate-800/80 p-4 rounded-lg border border-slate-700">
-            <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">
-              Total Sand Sales Revenue
-            </div>
-            <div className="mt-1 text-2xl font-bold font-mono text-emerald-400 tabular-nums">
-              {(kpi.totalRevenueEtb || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs font-normal text-emerald-300">ETB</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-1">
-              Delivered sand billed to clients
-            </div>
-          </div>
-
-          <div className="bg-slate-800/80 p-4 rounded-lg border border-slate-700">
-            <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">
-              Total Sand Cost (Crushers)
-            </div>
-            <div className="mt-1 text-2xl font-bold font-mono text-amber-400 tabular-nums">
-              {(kpi.totalCostEtb || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs font-normal text-amber-300">ETB</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-1">
-              Material purchase cost at loading pits
-            </div>
-          </div>
-
-          <div className="bg-slate-800/80 p-4 rounded-lg border border-slate-700">
-            <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">
-              Transport Corridor Fees
-            </div>
-            <div className="mt-1 text-2xl font-bold font-mono text-blue-400 tabular-nums">
-              {(kpi.totalTransportFeesEtb || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs font-normal text-blue-300">ETB</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-1">
-              Avg: {(kpi.avgTransportFeePerTruckEtb || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETB / trip
-            </div>
-          </div>
-
-          <div className="bg-slate-800/80 p-4 rounded-lg border border-slate-700">
-            <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">
-              Gross Operating Profit
-            </div>
-            <div className="mt-1 text-2xl font-bold font-mono text-white tabular-nums">
-              {(kpi.grossProfitEtb || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs font-normal text-slate-300">ETB</span>
-            </div>
-            <div className="text-[10px] text-emerald-400 mt-1 font-semibold">
-              {kpi.totalRevenueEtb > 0 ? `${((kpi.grossProfitEtb / kpi.totalRevenueEtb) * 100).toFixed(1)}% margin` : '0% margin'}
-            </div>
           </div>
         </div>
       </div>

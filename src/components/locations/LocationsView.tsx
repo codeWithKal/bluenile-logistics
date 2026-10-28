@@ -8,7 +8,8 @@ import {
   PhoneCall,
   Info,
   MapPin,
-  CheckCircle2
+  CheckCircle2,
+  Trash2
 } from 'lucide-react';
 import { Location } from '../../types';
 import { api } from '../../lib/api';
@@ -107,6 +108,33 @@ export const LocationsView: React.FC = () => {
       loadCrusherPlants();
     } catch (err: any) {
       setModalError(err.message || 'Failed to save crusher plant');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteLocation = async (loc: Location, force: boolean = false) => {
+    const confirmMsg = force
+      ? `Warning: Crusher plant "${loc.name}" has associated trips and/or route tariffs. Force delete will permanently erase this crusher facility, its route tariffs, and its trips. Proceed with force delete?`
+      : `Are you sure you want to delete crusher plant "${loc.name}"?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsSubmitting(true);
+    try {
+      await api.deleteLocation(loc.id, force);
+      if (isModalOpen && editingLoc?.id === loc.id) {
+        setIsModalOpen(false);
+      }
+      loadCrusherPlants();
+    } catch (err: any) {
+      if (err.data?.canForce) {
+        if (window.confirm(`${err.message}\n\nDo you want to permanently force-delete crusher plant "${loc.name}" along with its ${err.data.tripCount || 0} trip(s) and ${err.data.tariffCount || 0} tariff(s)?`)) {
+          handleDeleteLocation(loc, true);
+          return;
+        }
+      } else {
+        alert(err.message || 'Failed to delete crusher plant');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -217,13 +245,22 @@ export const LocationsView: React.FC = () => {
                       {loc.is_active === 1 ? 'Active Origin' : 'Inactive'}
                     </span>
                     {canEdit && (
-                      <button
-                        onClick={() => openEditModal(loc)}
-                        className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
-                        title="Edit Crusher Plant"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </button>
+                      <>
+                        <button
+                          onClick={() => openEditModal(loc)}
+                          className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                          title="Edit Crusher Plant"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteLocation(loc)}
+                          className="p-1 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                          title="Delete Crusher Plant"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -422,21 +459,36 @@ export const LocationsView: React.FC = () => {
                 </label>
               )}
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-3 py-1.5 text-slate-600 hover:text-slate-900 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-1.5 font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded cursor-pointer transition-colors shadow-2xs"
-                >
-                  {isSubmitting ? 'Saving...' : editingLoc ? 'Update Crusher Plant' : 'Save Crusher Plant'}
-                </button>
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div>
+                  {editingLoc && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteLocation(editingLoc)}
+                      disabled={isSubmitting}
+                      className="px-3 py-1.5 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded border border-red-200 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Crusher Plant</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-3 py-1.5 text-slate-600 hover:text-slate-900 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-4 py-1.5 font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded cursor-pointer transition-colors shadow-2xs"
+                  >
+                    {isSubmitting ? 'Saving...' : editingLoc ? 'Update Crusher Plant' : 'Save Crusher Plant'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

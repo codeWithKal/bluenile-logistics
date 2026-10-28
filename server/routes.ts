@@ -112,8 +112,11 @@ apiRouter.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
 });
 
-// Real-time Supabase persistent volume & SQLite backup diagnostics
-apiRouter.get('/system/cloud-backup', async (_req: Request, res: Response) => {
+// Apply auth parser across all API routes
+apiRouter.use(authenticate);
+
+// Real-time Supabase persistent volume & SQLite backup diagnostics (Admin Only)
+apiRouter.get('/system/cloud-backup', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const diagnostics = await getCloudBackupDiagnostics();
     res.json(diagnostics);
@@ -122,8 +125,8 @@ apiRouter.get('/system/cloud-backup', async (_req: Request, res: Response) => {
   }
 });
 
-// List all historic dated backup files stored in the Supabase bucket
-apiRouter.get('/system/cloud-backups', async (_req: Request, res: Response) => {
+// List all historic dated backup files stored in the Supabase bucket (Admin Only)
+apiRouter.get('/system/cloud-backups', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const backups = await listCloudBackups();
     res.json(backups);
@@ -132,8 +135,8 @@ apiRouter.get('/system/cloud-backups', async (_req: Request, res: Response) => {
   }
 });
 
-// Force manual backup sync to Supabase bucket (with optional timestamped snapshot)
-apiRouter.post('/system/cloud-backup/sync', async (req: Request, res: Response) => {
+// Force manual backup sync to Supabase bucket (Admin Only)
+apiRouter.post('/system/cloud-backup/sync', requireAdmin, async (req: Request, res: Response) => {
   try {
     const timestamped = req.body?.timestamped === true;
     const result = await forceCloudBackupSync({ timestamped });
@@ -143,8 +146,8 @@ apiRouter.post('/system/cloud-backup/sync', async (req: Request, res: Response) 
   }
 });
 
-// Download a specific dated backup file directly
-apiRouter.get('/system/cloud-backups/download', async (req: Request, res: Response) => {
+// Download a specific dated backup file directly (Admin Only)
+apiRouter.get('/system/cloud-backups/download', requireAdmin, async (req: Request, res: Response) => {
   const fileName = String(req.query.file || '');
   const cleanName = fileName.replace(/^backups\//, '').replace(/[^a-zA-Z0-9_.-]/g, '');
   if (!cleanName.endsWith('.sqlite')) {
@@ -184,8 +187,8 @@ apiRouter.get('/system/cloud-backups/download', async (req: Request, res: Respon
   }
 });
 
-// Restore database from a specific dated snapshot
-apiRouter.post('/system/cloud-backups/restore', async (req: Request, res: Response) => {
+// Restore database from a specific dated snapshot (Admin Only)
+apiRouter.post('/system/cloud-backups/restore', requireAdmin, async (req: Request, res: Response) => {
   const fileName = String(req.body?.file || '');
   if (!fileName) {
     return res.status(400).json({ error: 'Backup filename is required' });
@@ -202,9 +205,6 @@ apiRouter.post('/system/cloud-backups/restore', async (req: Request, res: Respon
     res.status(500).json({ error: err.message || String(err) });
   }
 });
-
-// Apply auth parser across all API routes
-apiRouter.use(authenticate);
 
 // ==========================================
 // AUTHENTICATION & USER MANAGEMENT
@@ -820,6 +820,36 @@ apiRouter.get('/trucks/:id/history', (req: Request, res: Response) => {
   return res.json({ truck, trips });
 });
 
+// Delete truck (Role A / Admin)
+apiRouter.delete('/trucks/:id', requireDataEntry, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const truck = queryOne<any>('SELECT * FROM trucks WHERE id = ?', [id]);
+  if (!truck) {
+    return res.status(404).json({ error: 'Truck not found' });
+  }
+
+  const tripStats = queryOne<any>('SELECT COUNT(*) as tripCount FROM trips WHERE truck_id = ?', [id]);
+  const tripCount = Number(tripStats?.tripCount || 0);
+
+  if (tripCount > 0 && req.query.force !== 'true') {
+    return res.status(400).json({
+      error: `Cannot delete truck "${truck.plate_number}" because it has ${tripCount} associated trip(s). You can deactivate it, or delete its trips first.`,
+      tripCount,
+      canForce: true
+    });
+  }
+
+  if (tripCount > 0 && req.query.force === 'true') {
+    execute('DELETE FROM trip_status_history WHERE trip_id IN (SELECT id FROM trips WHERE truck_id = ?)', [id]);
+    execute('DELETE FROM trips WHERE truck_id = ?', [id]);
+  }
+
+  execute('DELETE FROM trucks WHERE id = ?', [id]);
+  recordAuditLog(req.user?.id, req.user?.username, 'DELETE_TRUCK', 'truck', id, `Deleted truck ${truck.plate_number} (${truck.owner_name})`);
+
+  return res.json({ success: true, message: `Truck ${truck.plate_number} deleted successfully`, id });
+});
+
 // ==========================================
 // CONSTRUCTION COMPANIES & PROJECTS
 // ==========================================
@@ -903,6 +933,41 @@ apiRouter.get('/companies/:id/details', (req: Request, res: Response) => {
       totalRevenueEtb: summaryRes?.total_revenue_etb || 0,
     }
   });
+});
+
+// Delete company (Role A / Admin)
+apiRouter.delete('/companies/:id', requireDataEntry, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const company = queryOne<any>('SELECT * FROM construction_companies WHERE id = ?', [id]);
+  if (!company) {
+    return res.status(404).json({ error: 'Company not found' });
+  }
+
+  const tripStats = queryOne<any>('SELECT COUNT(*) as tripCount FROM trips WHERE company_id = ?', [id]);
+  const projStats = queryOne<any>('SELECT COUNT(*) as projectCount FROM projects WHERE company_id = ?', [id]);
+  const tripCount = Number(tripStats?.tripCount || 0);
+  const projectCount = Number(projStats?.projectCount || 0);
+
+  if ((tripCount > 0 || projectCount > 0) && req.query.force !== 'true') {
+    return res.status(400).json({
+      error: `Cannot delete company "${company.name}" because it has ${projectCount} project(s) and ${tripCount} trip(s). You can deactivate it, or delete its projects and trips first.`,
+      tripCount,
+      projectCount,
+      canForce: true
+    });
+  }
+
+  if (req.query.force === 'true') {
+    execute('DELETE FROM trip_status_history WHERE trip_id IN (SELECT id FROM trips WHERE company_id = ?)', [id]);
+    execute('DELETE FROM trips WHERE company_id = ?', [id]);
+    execute('UPDATE locations SET associated_company_id = NULL, associated_project_id = NULL WHERE associated_company_id = ?', [id]);
+    execute('DELETE FROM projects WHERE company_id = ?', [id]);
+  }
+
+  execute('DELETE FROM construction_companies WHERE id = ?', [id]);
+  recordAuditLog(req.user?.id, req.user?.username, 'DELETE_COMPANY', 'company', id, `Deleted company ${company.name}`);
+
+  return res.json({ success: true, message: `Company ${company.name} deleted successfully`, id });
 });
 
 // List projects
@@ -1014,6 +1079,41 @@ apiRouter.get('/projects/:id/details', (req: Request, res: Response) => {
       totalRevenueEtb: summaryRes?.total_revenue_etb || 0,
     }
   });
+});
+
+// Delete project (Role A / Admin)
+apiRouter.delete('/projects/:id', requireDataEntry, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const project = queryOne<any>('SELECT * FROM projects WHERE id = ?', [id]);
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+
+  const tripStats = queryOne<any>('SELECT COUNT(*) as tripCount FROM trips WHERE project_id = ? OR unloading_location_id = ?', [id, id]);
+  const tariffStats = queryOne<any>('SELECT COUNT(*) as tariffCount FROM route_tariffs WHERE destination_location_id = ?', [id]);
+  const tripCount = Number(tripStats?.tripCount || 0);
+  const tariffCount = Number(tariffStats?.tariffCount || 0);
+
+  if ((tripCount > 0 || tariffCount > 0) && req.query.force !== 'true') {
+    return res.status(400).json({
+      error: `Cannot delete project "${project.name}" because it has ${tripCount} trip(s) and ${tariffCount} route tariff(s) associated with it. You can deactivate it, or delete its trips/tariffs first.`,
+      tripCount,
+      tariffCount,
+      canForce: true
+    });
+  }
+
+  if (req.query.force === 'true') {
+    execute('DELETE FROM trip_status_history WHERE trip_id IN (SELECT id FROM trips WHERE project_id = ? OR unloading_location_id = ?)', [id, id]);
+    execute('DELETE FROM trips WHERE project_id = ? OR unloading_location_id = ?', [id, id]);
+    execute('DELETE FROM route_tariffs WHERE destination_location_id = ?', [id]);
+    execute('UPDATE locations SET associated_project_id = NULL WHERE associated_project_id = ?', [id]);
+  }
+
+  execute('DELETE FROM projects WHERE id = ?', [id]);
+  recordAuditLog(req.user?.id, req.user?.username, 'DELETE_PROJECT', 'project', id, `Deleted project ${project.name}`);
+
+  return res.json({ success: true, message: `Project ${project.name} deleted successfully`, id });
 });
 
 // ==========================================
@@ -1178,6 +1278,40 @@ apiRouter.get('/locations/:id/details', (req: Request, res: Response) => {
   });
 });
 
+// Delete location (Role A / Admin)
+apiRouter.delete('/locations/:id', requireDataEntry, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const location = queryOne<any>('SELECT * FROM locations WHERE id = ?', [id]);
+  if (!location) {
+    return res.status(404).json({ error: 'Location not found' });
+  }
+
+  const tripStats = queryOne<any>('SELECT COUNT(*) as tripCount FROM trips WHERE loading_location_id = ? OR unloading_location_id = ?', [id, id]);
+  const tariffStats = queryOne<any>('SELECT COUNT(*) as tariffCount FROM route_tariffs WHERE origin_location_id = ? OR destination_location_id = ?', [id, id]);
+  const tripCount = Number(tripStats?.tripCount || 0);
+  const tariffCount = Number(tariffStats?.tariffCount || 0);
+
+  if ((tripCount > 0 || tariffCount > 0) && req.query.force !== 'true') {
+    return res.status(400).json({
+      error: `Cannot delete location "${location.name}" because it has ${tripCount} trip(s) and ${tariffCount} route tariff(s) linked to it. You can deactivate it, or delete its trips/tariffs first.`,
+      tripCount,
+      tariffCount,
+      canForce: true
+    });
+  }
+
+  if (req.query.force === 'true') {
+    execute('DELETE FROM trip_status_history WHERE trip_id IN (SELECT id FROM trips WHERE loading_location_id = ? OR unloading_location_id = ?)', [id, id]);
+    execute('DELETE FROM trips WHERE loading_location_id = ? OR unloading_location_id = ?', [id, id]);
+    execute('DELETE FROM route_tariffs WHERE origin_location_id = ? OR destination_location_id = ?', [id, id]);
+  }
+
+  execute('DELETE FROM locations WHERE id = ?', [id]);
+  recordAuditLog(req.user?.id, req.user?.username, 'DELETE_LOCATION', 'location', id, `Deleted location ${location.name} (${location.location_type})`);
+
+  return res.json({ success: true, message: `Location ${location.name} deleted successfully`, id });
+});
+
 // ==========================================
 // ==========================================
 // ROUTE TRANSPORT TARIFFS (FIXED ROUTE FEES PER TRIP)
@@ -1334,6 +1468,20 @@ apiRouter.put('/route-tariffs/:id', requireDataEntry, (req: Request, res: Respon
   ]);
 
   return res.json({ success: true, id, fee_per_trip_etb: tripFee, rate_per_m3_etb: rateM3 });
+});
+
+// Delete route tariff (Role A / Admin)
+apiRouter.delete('/route-tariffs/:id', requireDataEntry, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const tariff = queryOne<any>('SELECT * FROM route_tariffs WHERE id = ?', [id]);
+  if (!tariff) {
+    return res.status(404).json({ error: 'Route tariff not found' });
+  }
+
+  execute('DELETE FROM route_tariffs WHERE id = ?', [id]);
+  recordAuditLog(req.user?.id, req.user?.username, 'DELETE_ROUTE_TARIFF', 'route_tariff', id, `Deleted route tariff from ${tariff.origin_location_name} to ${tariff.destination_location_name}`);
+
+  return res.json({ success: true, message: `Route tariff ${id} deleted successfully`, id });
 });
 
 // ==========================================
@@ -2001,6 +2149,21 @@ apiRouter.put('/trips/:id', requireDataEntry, (req: Request, res: Response) => {
     console.error('Failed to update trip:', err);
     return res.status(500).json({ error: err.message || 'Failed to update trip' });
   }
+});
+
+// Delete trip (Role A / Admin)
+apiRouter.delete('/trips/:id', requireDataEntry, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const trip = queryOne<any>('SELECT * FROM trips WHERE id = ?', [id]);
+  if (!trip) {
+    return res.status(404).json({ error: 'Trip not found' });
+  }
+
+  execute('DELETE FROM trip_status_history WHERE trip_id = ?', [id]);
+  execute('DELETE FROM trips WHERE id = ?', [id]);
+  recordAuditLog(req.user?.id, req.user?.username, 'DELETE_TRIP', 'trip', id, `Deleted trip ${id} for truck ${trip.truck_plate} (${trip.sand_type}, ${trip.quantity_loaded_m3} m³)`);
+
+  return res.json({ success: true, message: `Trip ${id} deleted successfully`, id });
 });
 
 // ==========================================

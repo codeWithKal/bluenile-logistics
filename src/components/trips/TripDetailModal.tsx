@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Edit, Truck as TruckIcon, MapPin, Building2, History, Route } from 'lucide-react';
+import { X, Edit, Truck as TruckIcon, MapPin, Building2, History, Route, Trash2 } from 'lucide-react';
 import { Trip, TripStatusHistory, Truck, TripStatus } from '../../types';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -9,6 +9,7 @@ interface TripDetailModalProps {
   onClose: () => void;
   onEditTrip: (trip: Trip) => void;
   onStatusUpdated: () => void;
+  onTripDeleted?: () => void;
   onViewTruckDossier?: (truckId: string) => void;
 }
 
@@ -17,6 +18,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
   onClose,
   onEditTrip,
   onStatusUpdated,
+  onTripDeleted,
   onViewTruckDossier,
 }) => {
   const { canEdit } = useAuth();
@@ -71,6 +73,24 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
     }
   };
 
+  const handleDeleteTrip = async () => {
+    if (!trip) return;
+    if (!window.confirm(`Are you sure you want to permanently delete trip record ${trip.id} for truck ${trip.truck_plate} (${trip.sand_type}, ${trip.quantity_loaded_m3} m³)?`)) {
+      return;
+    }
+    try {
+      await api.deleteTrip(trip.id);
+      onClose();
+      if (onTripDeleted) {
+        onTripDeleted();
+      } else {
+        onStatusUpdated();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete trip record');
+    }
+  };
+
   if (!tripId) return null;
 
   const getStatusColor = (st: TripStatus) => {
@@ -107,14 +127,25 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
           </div>
           <div className="flex items-center gap-2">
             {canEdit && trip && (
-              <button
-                type="button"
-                onClick={() => onEditTrip(trip)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded transition-colors shadow-2xs cursor-pointer"
-              >
-                <Edit className="w-3.5 h-3.5 text-slate-600" />
-                <span>Edit Record</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => onEditTrip(trip)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded transition-colors shadow-2xs cursor-pointer"
+                >
+                  <Edit className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Edit Record</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteTrip}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded transition-colors shadow-2xs cursor-pointer"
+                  title="Delete Trip Record"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                  <span>Delete</span>
+                </button>
+              </>
             )}
             <button
               type="button"

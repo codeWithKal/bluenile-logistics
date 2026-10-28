@@ -9,7 +9,8 @@ import {
   Phone,
   PhoneCall,
   Truck as TruckIcon,
-  DollarSign
+  DollarSign,
+  Trash2
 } from 'lucide-react';
 import { Truck, Trip } from '../../types';
 import { api } from '../../lib/api';
@@ -104,6 +105,33 @@ export const TrucksView: React.FC<TrucksViewProps> = ({ onNavigateToTruckDossier
       loadTrucks();
     } catch (err: any) {
       setModalError(err.message || 'Failed to save truck');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteTruck = async (truck: Truck, force: boolean = false) => {
+    const confirmMsg = force
+      ? `Warning: Truck "${truck.plate_number}" has associated trip records. Force delete will permanently erase this truck AND all its recorded trips. Proceed with force delete?`
+      : `Are you sure you want to delete truck "${truck.plate_number}" (${truck.owner_name})?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsSubmitting(true);
+    try {
+      await api.deleteTruck(truck.id, force);
+      if (isModalOpen && editingTruck?.id === truck.id) {
+        setIsModalOpen(false);
+      }
+      loadTrucks();
+    } catch (err: any) {
+      if (err.data?.canForce) {
+        if (window.confirm(`${err.message}\n\nDo you want to permanently delete truck "${truck.plate_number}" along with its ${err.data.tripCount} trip(s)?`)) {
+          handleDeleteTruck(truck, true);
+          return;
+        }
+      } else {
+        alert(err.message || 'Failed to delete truck');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -326,14 +354,24 @@ export const TrucksView: React.FC<TrucksViewProps> = ({ onNavigateToTruckDossier
                           <History className="w-3.5 h-3.5" />
                         </button>
                         {canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(t)}
-                            className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
-                            title="Edit Truck Details"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(t)}
+                              className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+                              title="Edit Truck Details"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTruck(t)}
+                              className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                              title="Delete Truck"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -443,21 +481,36 @@ export const TrucksView: React.FC<TrucksViewProps> = ({ onNavigateToTruckDossier
                   </label>
                 </div>
               )}
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-3 py-1.5 text-slate-600 hover:text-slate-900 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-1.5 font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded transition-colors cursor-pointer"
-                >
-                  {isSubmitting ? 'Saving...' : editingTruck ? 'Update Truck' : 'Register Truck'}
-                </button>
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div>
+                  {editingTruck && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTruck(editingTruck)}
+                      disabled={isSubmitting}
+                      className="px-3 py-1.5 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded border border-red-200 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Truck</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-3 py-1.5 text-slate-600 hover:text-slate-900 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-4 py-1.5 font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded transition-colors cursor-pointer"
+                  >
+                    {isSubmitting ? 'Saving...' : editingTruck ? 'Update Truck' : 'Register Truck'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

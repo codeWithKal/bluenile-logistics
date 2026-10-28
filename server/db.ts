@@ -565,6 +565,7 @@ export async function initDb() {
   migrateCrusherOnlyAndProjectDestinations();
   seedEthiopianSampleData();
   migrateInitialUserAuditLogs();
+  migrateCleanRouteTariffs();
 
   // Re-enable foreign keys for operations
   db.run('PRAGMA foreign_keys = ON;');
@@ -1454,7 +1455,10 @@ function migrateRouteTransportFees() {
 
     const now = new Date().toISOString();
 
-    // 4. Pre-seed fixed routes tariffs with FIXED FEE PER TRIP (ETB / trip)
+    // Clean up any route tariffs where origin is not a crusher loading plant
+    db.run("DELETE FROM route_tariffs WHERE origin_location_id NOT IN ('LOC-001', 'LOC-002', 'LOC-003')");
+
+    // 4. Pre-seed fixed routes tariffs STRICTLY from Crusher Plants (Loading Origins) to Destination Projects (Unloading)
     const routesConfig = [
       // From LOC-001: Red River Sand Crusher Plant #1
       { id: 'RT-001', oId: 'LOC-001', oName: 'Red River Sand Crusher Plant #1', dId: 'LOC-004', dName: 'HWY 35 Interchange Destination Project (Pier 7)', km: 34, tripFee: 9500, notes: 'Direct corridor via Northway Expressway' },
@@ -1475,19 +1479,7 @@ function migrateRouteTransportFees() {
       { id: 'RT-012', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-005', dName: 'Gateway Logistics Destination Project Phase 2', km: 39, tripFee: 10200, notes: 'East loop logistics access' },
       { id: 'RT-013', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-006', dName: 'Oakridge Estates Sector 4 Destination Project', km: 18, tripFee: 6500, notes: 'Adjacent residential feeder route' },
       { id: 'RT-014', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-007', dName: 'Keystone Concrete Destination Project & Silos', km: 31, tripFee: 9000, notes: 'Commercial aggregate transit' },
-      { id: 'RT-015', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-008', dName: 'Regional Municipal Stockpile Yard', km: 21, tripFee: 7200, notes: 'Airport perimeter corridor' },
-
-      // From LOC-007: Keystone Concrete & Silos (When acting as loading origin)
-      { id: 'RT-016', oId: 'LOC-007', oName: 'Keystone Concrete Destination Project & Silos', dId: 'LOC-004', dName: 'HWY 35 Interchange Destination Project (Pier 7)', km: 29, tripFee: 8500, notes: 'Direct highway staging' },
-      { id: 'RT-017', oId: 'LOC-007', oName: 'Keystone Concrete Destination Project & Silos', dId: 'LOC-005', dName: 'Gateway Logistics Destination Project Phase 2', km: 25, tripFee: 7800, notes: 'Inter-complex transfer' },
-      { id: 'RT-018', oId: 'LOC-007', oName: 'Keystone Concrete Destination Project & Silos', dId: 'LOC-006', dName: 'Oakridge Estates Sector 4 Destination Project', km: 36, tripFee: 9500, notes: 'Residential foundation supply' },
-      { id: 'RT-019', oId: 'LOC-007', oName: 'Keystone Concrete Destination Project & Silos', dId: 'LOC-008', dName: 'Regional Municipal Stockpile Yard', km: 20, tripFee: 7000, notes: 'Municipal overflow route' },
-
-      // From LOC-008: Regional Municipal Stockpile Yard
-      { id: 'RT-020', oId: 'LOC-008', oName: 'Regional Municipal Stockpile Yard', dId: 'LOC-004', dName: 'HWY 35 Interchange Destination Project (Pier 7)', km: 27, tripFee: 8200, notes: 'East loop direct' },
-      { id: 'RT-021', oId: 'LOC-008', oName: 'Regional Municipal Stockpile Yard', dId: 'LOC-005', dName: 'Gateway Logistics Destination Project Phase 2', km: 32, tripFee: 9000, notes: 'Logistics center transit' },
-      { id: 'RT-022', oId: 'LOC-008', oName: 'Regional Municipal Stockpile Yard', dId: 'LOC-006', dName: 'Oakridge Estates Sector 4 Destination Project', km: 23, tripFee: 7500, notes: 'East sector residential delivery' },
-      { id: 'RT-023', oId: 'LOC-008', oName: 'Regional Municipal Stockpile Yard', dId: 'LOC-007', dName: 'Keystone Concrete Destination Project & Silos', km: 20, tripFee: 7000, notes: 'Ready-mix batch emergency feed' }
+      { id: 'RT-015', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-008', dName: 'Regional Municipal Stockpile Yard', km: 21, tripFee: 7200, notes: 'Airport perimeter corridor' }
     ];
 
     for (const r of routesConfig) {
@@ -1893,4 +1885,68 @@ export function migrateInitialUserAuditLogs() {
     console.error('migrateInitialUserAuditLogs error:', err);
   }
 }
+
+export function migrateCleanRouteTariffs() {
+  if (!db) return;
+  try {
+    // 1. Clean up any route tariffs where origin is not a crusher loading plant
+    db.run(`
+      DELETE FROM route_tariffs
+      WHERE origin_location_id NOT IN (SELECT id FROM locations WHERE location_type IN ('Loading', 'Both'))
+         OR (
+           destination_location_id NOT IN (SELECT id FROM projects)
+           AND destination_location_id NOT IN (SELECT id FROM locations WHERE location_type IN ('Unloading', 'Both'))
+         );
+    `);
+
+    // 2. Also ensure each Crusher Site (Loading Origin) has route tariffs connecting to Destination Projects
+    const crushers = query<any>("SELECT id, name, latitude, longitude FROM locations WHERE location_type IN ('Loading', 'Both')");
+    const projects = query<any>("SELECT id, name, latitude, longitude FROM projects");
+    const now = new Date().toISOString();
+
+    if (crushers.length > 0 && projects.length > 0) {
+      let counter = 0;
+      for (const cr of crushers) {
+        for (const pr of projects) {
+          counter++;
+          const existing = queryOne<any>(
+            'SELECT id FROM route_tariffs WHERE origin_location_id = ? AND destination_location_id = ?',
+            [cr.id, pr.id]
+          );
+          if (!existing) {
+            const R = 6371;
+            const cLat = cr.latitude || 9.05;
+            const cLng = cr.longitude || 38.75;
+            const pLat = pr.latitude || 9.00;
+            const pLng = pr.longitude || 38.78;
+            const dLat = ((pLat - cLat) * Math.PI) / 180;
+            const dLon = ((pLng - cLng) * Math.PI) / 180;
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos((cLat * Math.PI) / 180) * Math.cos((pLat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+            const straightKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const roadKm = Math.max(14, Math.round(straightKm * 1.25));
+
+            const rawFee = 5500 + roadKm * 115;
+            const tripFee = Math.round(rawFee / 250) * 250;
+            const tId = `RT-${Date.now().toString().slice(-4)}${String(counter).padStart(3, '0')}`;
+
+            db.run(
+              `INSERT INTO route_tariffs (
+                id, origin_location_id, destination_location_id,
+                origin_location_name, destination_location_name,
+                distance_km, fee_per_trip_etb, rate_per_m3_etb, fixed_trip_fee_etb,
+                notes, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [tId, cr.id, pr.id, cr.name, pr.name, roadKm, tripFee, Math.round(tripFee / 20), tripFee, `Corridor: ${cr.name} → ${pr.name}`, now, now]
+            );
+          }
+        }
+      }
+    }
+
+    saveDb();
+  } catch (err) {
+    console.error('migrateCleanRouteTariffs error:', err);
+  }
+}
+
 

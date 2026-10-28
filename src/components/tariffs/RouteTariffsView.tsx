@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Route, Plus, Search, Edit3, ArrowRight, DollarSign, ShieldCheck, MapPin, ChevronLeft, ChevronRight, Factory, FolderGit2 } from 'lucide-react';
+import { Route, Plus, Search, Edit3, ArrowRight, DollarSign, ShieldCheck, MapPin, ChevronLeft, ChevronRight, Factory, FolderGit2, Trash2 } from 'lucide-react';
 import { RouteTariff, Location, Project } from '../../types';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -194,6 +194,26 @@ export const RouteTariffsView: React.FC = () => {
       loadData();
     } catch (err: any) {
       setModalError(err.message || 'Failed to save route tariff rate');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteTariff = async (tariff: RouteTariff) => {
+    const originDesc = tariff.origin_name || tariff.origin_location_name || tariff.origin_location_id;
+    const destDesc = tariff.destination_name || tariff.destination_location_name || tariff.destination_location_id;
+    if (!window.confirm(`Are you sure you want to delete this route tariff (${originDesc} → ${destDesc})?`)) {
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await api.deleteRouteTariff(tariff.id);
+      if (isModalOpen && editingTariff?.id === tariff.id) {
+        setIsModalOpen(false);
+      }
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete route tariff');
     } finally {
       setIsSubmitting(false);
     }
@@ -430,13 +450,23 @@ export const RouteTariffsView: React.FC = () => {
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         {canEdit && (
-                          <button
-                            onClick={() => openEditModal(t)}
-                            className="px-2.5 py-1 text-xs text-slate-700 hover:text-slate-900 hover:bg-slate-200/80 rounded transition-colors inline-flex items-center gap-1 cursor-pointer font-medium"
-                          >
-                            <Edit3 className="w-3 h-3 text-slate-500" />
-                            <span>Edit Corridor</span>
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => openEditModal(t)}
+                              className="px-2.5 py-1 text-xs text-slate-700 hover:text-slate-900 hover:bg-slate-200/80 rounded transition-colors inline-flex items-center gap-1 cursor-pointer font-medium"
+                            >
+                              <Edit3 className="w-3 h-3 text-slate-500" />
+                              <span>Edit Corridor</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTariff(t)}
+                              disabled={isSubmitting}
+                              className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                              title="Delete Route Tariff"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -648,21 +678,36 @@ export const RouteTariffsView: React.FC = () => {
               </div>
 
               {/* Modal Actions */}
-              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-700 hover:text-slate-900 transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-5 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded transition-colors shadow-xs cursor-pointer"
-                >
-                  {isSubmitting ? 'Saving Tariff...' : 'Save Corridor Tariff'}
-                </button>
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-3">
+                <div>
+                  {editingTariff && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTariff(editingTariff)}
+                      disabled={isSubmitting}
+                      className="px-3 py-2 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded border border-red-200 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Tariff</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-700 hover:text-slate-900 transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-5 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded transition-colors shadow-xs cursor-pointer"
+                  >
+                    {isSubmitting ? 'Saving Tariff...' : 'Save Corridor Tariff'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
