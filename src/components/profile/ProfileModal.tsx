@@ -135,7 +135,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
     setSyncingBackup(true);
     setSyncFeedback(null);
     try {
-      const res = await api.syncCloudBackup(false);
+      const res = await api.syncCloudBackup();
       if (res.success) {
         setSyncFeedback({ text: res.message, isError: false });
         await Promise.all([fetchBackupStatus(), fetchHistoricBackups()]);
@@ -149,21 +149,31 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
     }
   };
 
-  const handleCreateTimestampedSnapshot = async () => {
+  const handlePruneDuplicates = async () => {
     setSyncingBackup(true);
     setSyncFeedback(null);
     try {
-      const res = await api.syncCloudBackup(true);
-      if (res.success) {
-        setSyncFeedback({ text: res.message, isError: false });
-        await Promise.all([fetchBackupStatus(), fetchHistoricBackups()]);
-      } else {
-        setSyncFeedback({ text: res.message, isError: true });
-      }
+      const res = await api.pruneCloudBackups();
+      setSyncFeedback({ text: res.message, isError: !res.success });
+      await fetchHistoricBackups();
     } catch (err: any) {
-      setSyncFeedback({ text: err.message || 'Snapshot creation failed', isError: true });
+      setSyncFeedback({ text: err.message || 'Prune failed', isError: true });
     } finally {
       setSyncingBackup(false);
+    }
+  };
+
+  const handleDeleteBackup = async (fileName: string) => {
+    if (!window.confirm(`Are you sure you want to delete backup file "${fileName}" from cloud storage?`)) {
+      return;
+    }
+    setSyncFeedback(null);
+    try {
+      const res = await api.deleteCloudBackup(fileName);
+      setSyncFeedback({ text: res.message, isError: !res.success });
+      await fetchHistoricBackups();
+    } catch (err: any) {
+      setSyncFeedback({ text: err.message || 'Delete failed', isError: true });
     }
   };
 
@@ -787,18 +797,18 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                         className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${syncingBackup ? 'animate-spin' : ''}`} />
-                        <span>{syncingBackup ? 'Syncing...' : 'Sync Database (Daily Snapshot)'}</span>
+                        <span>{syncingBackup ? 'Syncing...' : 'Sync Live Database & Daily Backup'}</span>
                       </button>
 
                       <button
                         type="button"
-                        onClick={handleCreateTimestampedSnapshot}
+                        onClick={handlePruneDuplicates}
                         disabled={syncingBackup}
                         className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                        title="Creates an immutable snapshot stamped with the current date & hour"
+                        title="Scans backups folder and removes any multiple snapshots from the same calendar day"
                       >
-                        <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Create Timestamped Snapshot</span>
+                        <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Clean Duplicates (1 per day)</span>
                       </button>
                     </div>
                   </div>
@@ -822,9 +832,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <History className="w-4 h-4 text-amber-400" />
-                    <span className="font-bold text-slate-200">Dated Historic Snapshots</span>
+                    <span className="font-bold text-slate-200">Daily Historical Snapshots</span>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                      {historicBackups.length} file{historicBackups.length === 1 ? '' : 's'}
+                      {historicBackups.length} day{historicBackups.length === 1 ? '' : 's'}
                     </span>
                   </div>
                   <button
@@ -838,18 +848,18 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                   </button>
                 </div>
 
-                <p className="text-[11px] text-slate-400">
-                  Each day an automatic dated backup copy is saved in your Supabase bucket under <code className="text-amber-300 font-mono">backups/sand_logistics_YYYY-MM-DD.sqlite</code> alongside your live database.
-                </p>
+                <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[11px] text-amber-200/90 leading-relaxed">
+                  <strong>Strict 1 Backup / Day Policy:</strong> The system maintains exactly one dated SQLite backup per calendar day (<code className="text-amber-300 font-mono">backups/sand_logistics_YYYY-MM-DD.sqlite</code>). Any writes or syncs during the same day update that single backup in place.
+                </div>
 
                 {loadingBackupsList ? (
                   <div className="py-4 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
                     <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                    <span>Loading dated backups from bucket...</span>
+                    <span>Loading daily backups from bucket...</span>
                   </div>
                 ) : historicBackups.length === 0 ? (
                   <div className="py-4 text-center text-slate-500 text-xs border border-dashed border-slate-800 rounded-lg">
-                    No dated snapshots created yet. Click "Sync Database" or "Create Timestamped Snapshot" above to generate your first dated backup!
+                    No daily backup snapshots found yet. Click "Sync Live Database &amp; Daily Backup" above to generate your first backup!
                   </div>
                 ) : (
                   <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
@@ -887,18 +897,28 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
 
                           {/* Restore Snapshot Button */}
                           {user.role === 'admin' && (
-                            <button
-                              type="button"
-                              onClick={() => handleRestoreBackup(bk.name)}
-                              disabled={restoringFile === bk.name}
-                              className="p-1.5 rounded-md bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-slate-950 transition-colors flex items-center gap-1 text-[11px] cursor-pointer disabled:opacity-50"
-                              title="Restore system database to this point in time"
-                            >
-                              <RotateCcw className={`w-3.5 h-3.5 ${restoringFile === bk.name ? 'animate-spin' : ''}`} />
-                              <span className="hidden sm:inline">
-                                {restoringFile === bk.name ? 'Restoring...' : 'Restore'}
-                              </span>
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleRestoreBackup(bk.name)}
+                                disabled={restoringFile === bk.name}
+                                className="p-1.5 rounded-md bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-slate-950 transition-colors flex items-center gap-1 text-[11px] cursor-pointer disabled:opacity-50"
+                                title="Restore system database to this point in time"
+                              >
+                                <RotateCcw className={`w-3.5 h-3.5 ${restoringFile === bk.name ? 'animate-spin' : ''}`} />
+                                <span className="hidden sm:inline">
+                                  {restoringFile === bk.name ? 'Restoring...' : 'Restore'}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteBackup(bk.name)}
+                                className="p-1.5 rounded-md bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors flex items-center gap-1 text-[11px] cursor-pointer"
+                                title="Delete this backup file"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -907,20 +927,20 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                 )}
               </div>
 
-              {/* How to verify in Supabase Dashboard */}
+              {/* Storage Structure Info */}
               <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800 text-[11px] space-y-2 text-slate-400">
                 <div className="font-semibold text-slate-200 flex items-center gap-1.5">
                   <HardDrive className="w-3.5 h-3.5 text-amber-400" />
-                  <span>File Storage Organization in Supabase:</span>
+                  <span>Bucket Storage Architecture:</span>
                 </div>
                 <ul className="space-y-1.5 text-slate-300 font-mono text-[11px]">
                   <li className="flex items-start gap-2">
-                    <span className="text-amber-400 font-bold">1. Live File:</span>
-                    <span><code className="text-white">sandtrack-db/sand_logistics.sqlite</code> (Active live database used by the app)</span>
+                    <span className="text-amber-400 font-bold">1. Live DB:</span>
+                    <span><code className="text-white">sandtrack-db/sand_logistics.sqlite</code> (Live application database)</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="text-amber-400 font-bold">2. Dated Backups:</span>
-                    <span><code className="text-white">sandtrack-db/backups/sand_logistics_YYYY-MM-DD.sqlite</code> (Daily historical snapshots)</span>
+                    <span className="text-amber-400 font-bold">2. Daily Backup:</span>
+                    <span><code className="text-white">sandtrack-db/backups/sand_logistics_YYYY-MM-DD.sqlite</code> (Exactly 1 backup file per calendar day)</span>
                   </li>
                 </ul>
               </div>

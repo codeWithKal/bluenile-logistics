@@ -8,7 +8,7 @@ import {
   SEED_COMPANIES,
   SEED_CRUSHERS,
   SEED_PROJECTS
-} from './seedData';
+} from './seedData.ts';
 
 const DB_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(process.cwd(), 'data');
 const DB_PATH = path.resolve(DB_DIR, 'sand_logistics.sqlite');
@@ -383,11 +383,9 @@ export async function forceCloudBackupSync(options?: { timestamped?: boolean }):
       lastBackupSize = buffer.byteLength;
       lastBackupError = null;
 
-      // Also create a dated backup file in the backups/ folder
+      // Strictly ONE dated backup file per calendar day: sand_logistics_YYYY-MM-DD.sqlite
       const today = getTodayDateString();
-      const snapshotName = options?.timestamped
-        ? `sand_logistics_${getBackupTimestampString()}.sqlite`
-        : `sand_logistics_${today}.sqlite`;
+      const snapshotName = `sand_logistics_${today}.sqlite`;
 
       const datedUrl = `${config.url}/storage/v1/object/${config.bucket}/backups/${snapshotName}`;
       await fetch(datedUrl, {
@@ -400,14 +398,17 @@ export async function forceCloudBackupSync(options?: { timestamped?: boolean }):
         },
         body: buffer,
       }).catch((err) => {
-        console.warn('[Supabase Cloud Backup] Could not save dated backup copy:', err);
+        console.warn('[Supabase Cloud Backup] Could not save daily backup copy:', err);
       });
 
       lastDailyBackupDate = today;
 
+      // Prune any legacy duplicate same-day snapshots if present
+      pruneMultipleBackupsPerDay().catch(() => {});
+
       return {
         success: true,
-        message: `Successfully updated primary cloud database and saved dated backup "${snapshotName}" (${Math.round(buffer.byteLength / 1024)} KB).`,
+        message: `Successfully synchronized live database and updated today's single backup "${snapshotName}" (${Math.round(buffer.byteLength / 1024)} KB).`,
         sizeBytes: buffer.byteLength,
         snapshotName
       };
@@ -427,12 +428,153 @@ export async function forceCloudBackupSync(options?: { timestamped?: boolean }):
   }
 }
 
+export async function deleteCloudBackup(backupName: string): Promise<{ success: boolean; message: string }> {
+  const config = getSupabaseConfig();
+  if (!config) return { success: false, message: 'Cloud storage is not configured.' };
+
+  const cleanName = backupName.replace(/^backups\//, '').replace(/[^a-zA-Z0-9_.-]/g, '');
+  if (!cleanName.endsWith('.sqlite')) {
+    return { success: false, message: 'Invalid backup file name.' };
+  }
+
+  try {
+    const deleteUrl = `${config.url}/storage/v1/object/${config.bucket}/backups/${cleanName}`;
+    const res = await fetch(deleteUrl, {
+      method: 'DELETE',
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+      },
+    });
+
+    if (!res.ok) {
+      // Fallback to bulk delete endpoint
+      const bulkDeleteUrl = `${config.url}/storage/v1/object/${config.bucket}`;
+      const bulkRes = await fetch(bulkDeleteUrl, {
+        method: 'DELETE',
+        headers: {
+          apikey: config.key,
+          Authorization: `Bearer ${config.key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prefixes: [`backups/${cleanName}`] }),
+      });
+      if (!bulkRes.ok) {
+        const errText = await bulkRes.text().catch(() => '');
+        return { success: false, message: `Failed to delete backup file: ${errText}` };
+      }
+    }
+
+    return { success: true, message: `Backup "${cleanName}" deleted successfully.` };
+  } catch (err: any) {
+    return { success: false, message: err.message || String(err) };
+  }
+}
+
+export async function pruneMultipleBackupsPerDay(): Promise<{
+  success: boolean;
+  deletedCount: number;
+  retainedCount: number;
+  message: string;
+}> {
+  const config = getSupabaseConfig();
+  if (!config) return { success: false, deletedCount: 0, retainedCount: 0, message: 'Cloud storage not configured.' };
+
+  try {
+    const listUrl = `${config.url}/storage/v1/object/list/${config.bucket}`;
+    const listRes = await fetch(listUrl, {
+      method: 'POST',
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prefix: 'backups',
+        limit: 100,
+        sortBy: { column: 'name', order: 'desc' }
+      }),
+    });
+
+    if (!listRes.ok) return { success: false, deletedCount: 0, retainedCount: 0, message: 'Failed to list backups.' };
+
+    const items: any[] = await listRes.json().catch(() => []);
+    if (!Array.isArray(items) || items.length === 0) {
+      return { success: true, deletedCount: 0, retainedCount: 0, message: 'No backup files found.' };
+    }
+
+    const sqliteFiles = items.filter(it => it.name && it.name.endsWith('.sqlite'));
+
+    // Group files by calendar date (YYYY-MM-DD)
+    const filesByDate: Record<string, any[]> = {};
+    for (const f of sqliteFiles) {
+      const match = f.name.match(/(\d{4}-\d{2}-\d{2})/);
+      if (match) {
+        const dateKey = match[1];
+        if (!filesByDate[dateKey]) filesByDate[dateKey] = [];
+        filesByDate[dateKey].push(f);
+      }
+    }
+
+    const filesToDelete: string[] = [];
+    let retainedCount = 0;
+
+    for (const [dateKey, fileList] of Object.entries(filesByDate)) {
+      retainedCount++;
+      const canonicalName = `sand_logistics_${dateKey}.sqlite`;
+
+      // If there are multiple files for this day, keep only the canonical one
+      for (const f of fileList) {
+        if (f.name !== canonicalName) {
+          filesToDelete.push(f.name);
+        }
+      }
+    }
+
+    // Delete redundant files
+    let deletedCount = 0;
+    for (const name of filesToDelete) {
+      const delRes = await fetch(`${config.url}/storage/v1/object/${config.bucket}/backups/${name}`, {
+        method: 'DELETE',
+        headers: {
+          apikey: config.key,
+          Authorization: `Bearer ${config.key}`,
+        },
+      });
+      if (!delRes.ok) {
+        await fetch(`${config.url}/storage/v1/object/${config.bucket}`, {
+          method: 'DELETE',
+          headers: {
+            apikey: config.key,
+            Authorization: `Bearer ${config.key}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ prefixes: [`backups/${name}`] }),
+        }).catch(() => {});
+      }
+      deletedCount++;
+    }
+
+    return {
+      success: true,
+      deletedCount,
+      retainedCount,
+      message: deletedCount > 0
+        ? `Cleaned up ${deletedCount} duplicate backup(s). Exactly 1 backup per day retained (${retainedCount} daily file(s)).`
+        : `Already strictly 1 backup per day (${retainedCount} daily file(s)).`
+    };
+  } catch (err: any) {
+    return { success: false, deletedCount: 0, retainedCount: 0, message: err.message || String(err) };
+  }
+}
+
 export async function listCloudBackups(): Promise<Array<{
   name: string;
   path: string;
   sizeBytes: number;
   sizeKb: number;
   updatedAt: string;
+  dateKey: string;
   isDaily: boolean;
 }>> {
   const config = getSupabaseConfig();
@@ -459,16 +601,35 @@ export async function listCloudBackups(): Promise<Array<{
     const data: any[] = await res.json().catch(() => []);
     if (!Array.isArray(data)) return [];
 
-    return data
-      .filter(item => item.name && item.name.endsWith('.sqlite'))
-      .map(item => ({
+    const sqliteFiles = data.filter(item => item.name && item.name.endsWith('.sqlite'));
+
+    // Group by calendar date: exactly 1 file per day
+    const mapByDate = new Map<string, any>();
+    for (const item of sqliteFiles) {
+      const match = item.name.match(/(\d{4}-\d{2}-\d{2})/);
+      const dateKey = match ? match[1] : item.name;
+      const isExactCanonical = item.name === `sand_logistics_${dateKey}.sqlite`;
+
+      // If not yet present, or if this item is the exact canonical daily filename, use it
+      if (!mapByDate.has(dateKey) || isExactCanonical) {
+        mapByDate.set(dateKey, item);
+      }
+    }
+
+    // Sort descending by dateKey (newest first)
+    const sorted = Array.from(mapByDate.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([dateKey, item]) => ({
         name: item.name,
         path: `backups/${item.name}`,
         sizeBytes: item.metadata?.size || item.metadata?.contentLength || 0,
         sizeKb: Math.round((item.metadata?.size || item.metadata?.contentLength || 0) / 1024),
         updatedAt: item.updated_at || item.created_at || new Date().toISOString(),
-        isDaily: !item.name.includes('_') || item.name.split('_').length <= 3,
+        dateKey,
+        isDaily: true,
       }));
+
+    return sorted;
   } catch (err) {
     console.warn('[Supabase Cloud Backup] Could not list historic backups:', err);
     return [];

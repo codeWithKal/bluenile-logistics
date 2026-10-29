@@ -1,11 +1,12 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { query, queryOne, execute, transaction, getCloudBackupDiagnostics, forceCloudBackupSync, listCloudBackups, restoreCloudBackup } from './db.ts';
+import { query, queryOne, execute, transaction, getCloudBackupDiagnostics, forceCloudBackupSync, listCloudBackups, restoreCloudBackup, deleteCloudBackup, pruneMultipleBackupsPerDay } from './db.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sandtrack-secret-key-2026-secure';
 
-export const apiRouter = Router();
+export const apiRouter = express.Router();
 
 // Auth token helper
 export interface AuthenticatedUser {
@@ -135,12 +136,36 @@ apiRouter.get('/system/cloud-backups', requireAdmin, async (_req: Request, res: 
   }
 });
 
-// Force manual backup sync to Supabase bucket (Admin Only)
-apiRouter.post('/system/cloud-backup/sync', requireAdmin, async (req: Request, res: Response) => {
+// Force manual backup sync to Supabase bucket: strictly 1 backup per day (Admin Only)
+apiRouter.post('/system/cloud-backup/sync', requireAdmin, async (_req: Request, res: Response) => {
   try {
-    const timestamped = req.body?.timestamped === true;
-    const result = await forceCloudBackupSync({ timestamped });
+    const result = await forceCloudBackupSync();
     res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Prune legacy/duplicate same-day backups to enforce strictly 1 backup per day (Admin Only)
+apiRouter.post('/system/cloud-backups/prune', requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const result = await pruneMultipleBackupsPerDay();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Delete a specific dated backup file from Supabase storage (Admin Only)
+apiRouter.delete('/system/cloud-backups/:filename', requireAdmin, async (req: Request, res: Response) => {
+  const { filename } = req.params;
+  try {
+    const result = await deleteCloudBackup(filename);
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(400).json(result);
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
   }
@@ -1596,18 +1621,21 @@ apiRouter.get('/trips', (req: Request, res: Response) => {
   const countRes = queryOne<{ total: number }>(`SELECT COUNT(*) as total FROM trips WHERE ${whereSql}`, params);
   const total = countRes?.total || 0;
 
+  const parsedLimit = Math.min(Math.max(1, Number(limit) || 50), 500);
+  const parsedOffset = Math.max(0, Number(offset) || 0);
+
   const trips = query<any>(
     `SELECT tr.*,
        (SELECT owner_phone FROM trucks WHERE id = tr.truck_id) as truck_owner_phone,
        (SELECT capacity_m3 FROM trucks WHERE id = tr.truck_id) as truck_capacity_m3
      FROM trips tr WHERE ${whereSql} ORDER BY tr.trip_date DESC, tr.created_at DESC, tr.id DESC LIMIT ? OFFSET ?`,
-    [...params, Number(limit), Number(offset)]
+    [...params, parsedLimit, parsedOffset]
   );
 
   return res.json({
     total,
-    limit: Number(limit),
-    offset: Number(offset),
+    limit: parsedLimit,
+    offset: parsedOffset,
     trips
   });
 });

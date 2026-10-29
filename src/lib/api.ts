@@ -495,15 +495,27 @@ export const api = {
     sizeBytes: number;
     sizeKb: number;
     updatedAt: string;
+    dateKey?: string;
     isDaily: boolean;
   }>> {
     return request<any[]>('/system/cloud-backups');
   },
 
-  async syncCloudBackup(timestamped: boolean = false): Promise<{ success: boolean; message: string; sizeBytes?: number; snapshotName?: string }> {
+  async syncCloudBackup(): Promise<{ success: boolean; message: string; sizeBytes?: number; snapshotName?: string }> {
     return request<any>('/system/cloud-backup/sync', {
       method: 'POST',
-      body: JSON.stringify({ timestamped }),
+    });
+  },
+
+  async pruneCloudBackups(): Promise<{ success: boolean; deletedCount: number; retainedCount: number; message: string }> {
+    return request<any>('/system/cloud-backups/prune', {
+      method: 'POST',
+    });
+  },
+
+  async deleteCloudBackup(filename: string): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>(`/system/cloud-backups/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
     });
   },
 
