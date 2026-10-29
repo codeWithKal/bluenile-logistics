@@ -97,10 +97,19 @@ function MainApp() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400 font-mono text-xs">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
-          <span>Verifying Alex Logistics credentials...</span>
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="p-3 bg-white rounded-2xl shadow-xl ring-1 ring-white/10 animate-pulse">
+            <img
+              src="/ab-trading-logo.jpg"
+              alt="AB Trading"
+              className="h-12 sm:h-14 w-auto object-contain"
+            />
+          </div>
+          <div className="flex items-center gap-2.5 text-slate-400 font-mono text-xs">
+            <div className="w-4 h-4 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
+            <span>Verifying AB Trading credentials...</span>
+          </div>
         </div>
       </div>
     );

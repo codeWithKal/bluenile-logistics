@@ -83,7 +83,7 @@ export const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({
                 )}
               </div>
               <div className="text-[11px] text-slate-500 font-mono">
-                Client ID: {companyId} • Alex Logistics Client Registry
+                Client ID: {companyId} • AB Trading Client Registry
               </div>
             </div>
           </div>

@@ -73,16 +73,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}
       >
         {/* Brand Lockup */}
-        <div className="h-16 px-6 flex items-center justify-between border-b border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded bg-amber-500 flex items-center justify-center font-bold text-slate-950 text-base shadow-xs">
-              A
+        <div className="h-16 px-4 flex items-center justify-between border-b border-slate-800">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-lg bg-white p-1 flex items-center justify-center shadow-xs shrink-0 overflow-hidden ring-1 ring-white/10">
+              <img
+                src="/ab-trading-logo.jpg"
+                alt="AB Trading Logo"
+                className="w-full h-full object-contain"
+              />
             </div>
-            <div>
-              <span className="font-bold text-base tracking-tight text-white block leading-tight">
-                Alex Logistics
+            <div className="min-w-0">
+              <span className="font-bold text-sm tracking-tight text-white block leading-tight truncate">
+                AB Trading
               </span>
-              <span className="text-[10px] text-amber-400 font-mono tracking-wider">
+              <span className="text-[10px] text-amber-400 font-mono tracking-wider block truncate">
                 SAND &amp; AGGREGATE
               </span>
             </div>

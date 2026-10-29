@@ -146,7 +146,7 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ onNavigateToCompan
         <div className="flex items-center gap-2">
           <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
           <span>
-            <strong>Construction Companies:</strong> Clients receiving sand &amp; aggregate deliveries from Alex Logistics. Click any company card to open detailed profile, direct call button, and active jobsites.
+            <strong>Construction Companies:</strong> Clients receiving sand &amp; aggregate deliveries from AB Trading. Click any company card to open detailed profile, direct call button, and active jobsites.
           </span>
         </div>
       </div>

@@ -29,7 +29,7 @@ async function startServer() {
   const healthHandler = (_req: Request, res: Response) => {
     res.json({
       status: 'ok',
-      service: 'alex-logistics',
+      service: 'ab-trading',
       uptime: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
     });
@@ -106,7 +106,7 @@ async function startServer() {
   });
 
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Alex Logistics Server listening on http://0.0.0.0:${PORT} [${isProd ? 'production' : 'development'}]`);
+    console.log(`AB Trading Server listening on http://0.0.0.0:${PORT} [${isProd ? 'production' : 'development'}]`);
   });
 
   // Graceful shutdown
@@ -120,7 +120,7 @@ async function startServer() {
     }
     server.closeIdleConnections?.();
     server.close(() => {
-      console.log('Alex Logistics HTTP server closed.');
+      console.log('AB Trading HTTP server closed.');
       process.exit(0);
     });
     setTimeout(() => {

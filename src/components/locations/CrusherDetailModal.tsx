@@ -72,7 +72,7 @@ export const CrusherDetailModal: React.FC<CrusherDetailModalProps> = ({
                 </span>
               </div>
               <div className="text-[11px] text-slate-500 font-mono">
-                Facility ID: {locationId} • Alex Logistics Loading Quarry Source
+                Facility ID: {locationId} • AB Trading Loading Quarry Source
               </div>
             </div>
           </div>

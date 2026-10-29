@@ -42,16 +42,22 @@ export const LoginView: React.FC = () => {
     <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4 sm:p-6 text-slate-100">
       <div className="relative z-10 w-full max-w-lg space-y-6">
         {/* Brand Lockup */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-500 text-slate-950 font-bold text-2xl shadow-lg ring-4 ring-amber-500/20">
-            A
+        <div className="text-center space-y-3">
+          <div className="inline-block p-3 bg-white rounded-2xl shadow-xl ring-1 ring-white/10">
+            <img
+              src="/ab-trading-logo.jpg"
+              alt="AB Trading Logo"
+              className="h-16 sm:h-20 w-auto object-contain mx-auto"
+            />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-            Alex Logistics
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-400 max-w-sm mx-auto">
-            Sand &amp; Aggregate Transport: Hired Trucks from Crusher Sites to Construction Projects
-          </p>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+              AB Trading
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400 max-w-sm mx-auto mt-1">
+              Sand &amp; Aggregate Transport: Hired Trucks from Crusher Sites to Construction Projects
+            </p>
+          </div>
         </div>
 
         {/* Main Auth Card */}
@@ -244,7 +250,7 @@ export const LoginView: React.FC = () => {
             <span>Where Sand Delivery &amp; Unloading Takes Place</span>
           </div>
           <div className="text-slate-500 text-[10px]">
-            Alex Logistics • Unified Fleet &amp; Delivery Management
+            AB Trading • Unified Fleet &amp; Delivery Management
           </div>
         </div>
       </div>

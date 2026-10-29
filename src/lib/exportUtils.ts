@@ -56,7 +56,7 @@ export function exportToPdf(
   // Subtitle / Filters
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(`Alex Logistics • Generated: ${new Date().toLocaleString()} • ${filterInfo}`, 40, 56);
+  doc.text(`AB Trading • Generated: ${new Date().toLocaleString()} • ${filterInfo}`, 40, 56);
 
   if (summaryNotes) {
     doc.setFontSize(9);
@@ -303,7 +303,7 @@ export function exportTruckDossierPdf(dossier: SpecificTruckDossier, filterPerio
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
       doc.text(
-        `Alex Logistics • ${isAllTrucks ? 'Consolidated Fleet Report' : `Truck ${truck.plate_number}`} • Page ${data.pageNumber} of ${pageCount}`,
+        `AB Trading • ${isAllTrucks ? 'Consolidated Fleet Report' : `Truck ${truck.plate_number}`} • Page ${data.pageNumber} of ${pageCount}`,
         doc.internal.pageSize.getWidth() - 260,
         doc.internal.pageSize.getHeight() - 15
       );
@@ -342,7 +342,7 @@ export function exportRegisteredTripsAndTrucksPdf(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(245, 158, 11); // amber-500
-  doc.text('ALEX LOGISTICS — REGISTERED TRIPS & TRUCK PERFORMANCE REPORT', 55, 48);
+  doc.text('AB TRADING — REGISTERED TRIPS & TRUCK PERFORMANCE REPORT', 55, 48);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
@@ -450,7 +450,7 @@ export function exportRegisteredTripsAndTrucksPdf(
       doc.setFontSize(7.5);
       doc.setTextColor(148, 163, 184);
       doc.text(
-        `Alex Logistics • Registered Trips & Truck Performance Report • Page ${data.pageNumber} of ${pageCount}`,
+        `AB Trading • Registered Trips & Truck Performance Report • Page ${data.pageNumber} of ${pageCount}`,
         pageWidth - 310,
         doc.internal.pageSize.getHeight() - 15
       );
@@ -496,7 +496,7 @@ export function exportTruckTransportPivotPdf(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(203, 213, 225); // slate-300
-  doc.text(`Alex Logistics Sand Transport • Generated: ${new Date().toLocaleString()} • ${filterInfo}`, 40, 44);
+  doc.text(`AB Trading Sand Transport • Generated: ${new Date().toLocaleString()} • ${filterInfo}`, 40, 44);
 
   // Executive KPI summary bar
   let currentY = 70;
@@ -727,7 +727,7 @@ export function exportTruckTransportPivotPdf(
       doc.setFontSize(7);
       doc.setTextColor(148, 163, 184);
       doc.text(
-        `Alex Logistics • Hired Trucks Transport Fees Pivot Ledger • Page ${data.pageNumber} of ${pageCount}`,
+        `AB Trading • Hired Trucks Transport Fees Pivot Ledger • Page ${data.pageNumber} of ${pageCount}`,
         pageWidth - 280,
         pageHeight - 12
       );

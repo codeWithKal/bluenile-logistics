@@ -43,9 +43,16 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Menu className="w-5 h-5" />
         </button>
+        <div className="w-9 h-9 rounded-lg bg-white border border-slate-200/90 p-0.5 flex items-center justify-center shrink-0 shadow-2xs">
+          <img
+            src="/ab-trading-logo.jpg"
+            alt="AB Trading Logo"
+            className="w-full h-full object-contain"
+          />
+        </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span>Alex Logistics</span>
+            <span className="font-medium text-slate-700">AB Trading</span>
             <span aria-hidden="true">/</span>
             <span className="font-medium text-slate-800 truncate">{current.title}</span>
           </div>

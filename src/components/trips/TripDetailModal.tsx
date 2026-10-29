@@ -517,7 +517,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
         {/* Footer */}
         <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
           <span className="text-[11px] text-slate-500 font-mono">
-            Alex Logistics Unified Dispatch &amp; Delivery Record
+            AB Trading Unified Dispatch &amp; Delivery Record
           </span>
           <button
             type="button"
