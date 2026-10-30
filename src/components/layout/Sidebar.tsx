@@ -77,9 +77,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-lg bg-white p-1 flex items-center justify-center shadow-xs shrink-0 overflow-hidden ring-1 ring-white/10">
               <img
-                src="/ab-trading-logo.jpg"
+                src="/assets/aistudio/Gemini_Generated_Image_7d7e1z7d7e1z7d7e_51707232.jpeg"
                 alt="AB Trading Logo"
                 className="w-full h-full object-contain"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (!target.dataset.fallback) {
+                    target.dataset.fallback = 'true';
+                    target.src = '/ab-trading-logo.jpg';
+                  }
+                }}
               />
             </div>
             <div className="min-w-0">

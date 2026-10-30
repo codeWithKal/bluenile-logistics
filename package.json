@@ -10,10 +10,12 @@
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
+    "migrate:supabase": "tsx scripts/migrate-to-supabase.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
+    "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vis.gl/react-google-maps": "^1.10.1",
     "@vitejs/plugin-react": "^6.1.1",

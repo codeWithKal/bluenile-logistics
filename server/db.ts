@@ -9,6 +9,7 @@ import {
   SEED_CRUSHERS,
   SEED_PROJECTS
 } from './seedData.ts';
+import { fetchAllFromSupabase } from './supabaseSync.ts';
 
 const DB_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(process.cwd(), 'data');
 const DB_PATH = path.resolve(DB_DIR, 'sand_logistics.sqlite');
@@ -696,13 +697,80 @@ export async function restoreCloudBackup(backupName: string): Promise<{ success:
 let SQL: SqlJsStatic;
 let db: Database;
 
+export async function loadAllFromSupabasePostgres(): Promise<boolean> {
+  try {
+    const users = await fetchAllFromSupabase('users');
+    if (!users || users.length === 0) {
+      console.log('[Supabase PostgreSQL] No users in cloud database yet, using initial seed.');
+      return false;
+    }
+
+    console.log(`[Supabase PostgreSQL] Hydrating system directly from cloud database tables...`);
+    db.run('PRAGMA foreign_keys = OFF;');
+
+    const tables = [
+      'users',
+      'trucks',
+      'construction_companies',
+      'locations',
+      'projects',
+      'route_tariffs',
+      'trips',
+      'trip_status_history',
+      'audit_logs',
+    ];
+
+    for (const tableName of tables) {
+      const rows = tableName === 'users' ? users : await fetchAllFromSupabase(tableName);
+      if (!rows || rows.length === 0) continue;
+
+      const tableCols = (db.exec(`PRAGMA table_info(${tableName})`)[0]?.values || []).map((v: any[]) => v[1]);
+      const validColSet = new Set(tableCols);
+
+      db.run(`DELETE FROM ${tableName};`);
+
+      for (const row of rows) {
+        const cols: string[] = [];
+        const placeholders: string[] = [];
+        const values: any[] = [];
+
+        for (const [k, v] of Object.entries(row)) {
+          if (!validColSet.has(k)) continue;
+          cols.push(k);
+          placeholders.push('?');
+          if (typeof v === 'boolean') {
+            values.push(v ? 1 : 0);
+          } else if (v !== null && typeof v === 'object') {
+            values.push(JSON.stringify(v));
+          } else {
+            values.push(v);
+          }
+        }
+
+        try {
+          db.run(
+            `INSERT OR REPLACE INTO ${tableName} (${cols.join(', ')}) VALUES (${placeholders.join(', ')})`,
+            values
+          );
+        } catch (insertErr: any) {
+          console.warn(`[Supabase PostgreSQL] Hydration insert error on ${tableName}:`, insertErr.message);
+        }
+      }
+    }
+
+    db.run('PRAGMA foreign_keys = ON;');
+    console.log('[Supabase PostgreSQL] System successfully hydrated from cloud database.');
+    return true;
+  } catch (err: any) {
+    console.warn('[Supabase PostgreSQL] Cloud hydrate warning:', err.message || err);
+    return false;
+  }
+}
+
 export async function initDb() {
   if (!fs.existsSync(DB_DIR)) {
     fs.mkdirSync(DB_DIR, { recursive: true });
   }
-
-  // Restore from free cloud storage if configured
-  await downloadCloudBackup();
 
   SQL = await initSqlJs();
 
@@ -716,17 +784,23 @@ export async function initDb() {
   // Disable foreign keys during startup schema migrations and seeding
   db.run('PRAGMA foreign_keys = OFF;');
 
-  // Create tables
+  // Create tables & run any structural migrations
   createTables();
   migrateUserAvatar();
-  seedInitialData();
   migrateCrusherLocations();
   migrateFinancialColumns();
   migrateRouteTransportFees();
   migrateCrusherOnlyAndProjectDestinations();
-  seedEthiopianSampleData();
-  migrateInitialUserAuditLogs();
-  migrateCleanRouteTariffs();
+
+  // Primary source of truth: Load live state from Supabase PostgreSQL tables!
+  const hydratedFromSupabase = await loadAllFromSupabasePostgres();
+  if (!hydratedFromSupabase) {
+    await downloadCloudBackup();
+    seedInitialData();
+    seedEthiopianSampleData();
+    migrateInitialUserAuditLogs();
+    migrateCleanRouteTariffs();
+  }
 
   // Re-enable foreign keys for operations
   db.run('PRAGMA foreign_keys = ON;');

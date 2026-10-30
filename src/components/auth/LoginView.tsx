@@ -45,9 +45,16 @@ export const LoginView: React.FC = () => {
         <div className="text-center space-y-3">
           <div className="inline-block p-3 bg-white rounded-2xl shadow-xl ring-1 ring-white/10">
             <img
-              src="/ab-trading-logo.jpg"
+              src="/assets/aistudio/Gemini_Generated_Image_7d7e1z7d7e1z7d7e_51707232.jpeg"
               alt="AB Trading Logo"
               className="h-16 sm:h-20 w-auto object-contain mx-auto"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (!target.dataset.fallback) {
+                  target.dataset.fallback = 'true';
+                  target.src = '/ab-trading-logo.jpg';
+                }
+              }}
             />
           </div>
           <div>

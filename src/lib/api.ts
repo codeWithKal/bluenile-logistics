@@ -525,4 +525,14 @@ export const api = {
       body: JSON.stringify({ file }),
     });
   },
+
+  async runSupabaseMigration(): Promise<{
+    success: boolean;
+    results: Array<{ table: string; sqliteRows: number; migratedRows: number; success: boolean; error?: string }>;
+    summary: string;
+  }> {
+    return request<any>('/system/migrate-to-supabase', {
+      method: 'POST',
+    });
+  },
 };

@@ -457,7 +457,7 @@ export function exportRegisteredTripsAndTrucksPdf(
     },
   });
 
-  doc.save(`alex_logistics_trips_and_truck_performance_${Date.now()}.pdf`);
+  doc.save(`ab_trading_trips_and_truck_performance_${Date.now()}.pdf`);
 }
 
 export function exportTruckTransportPivotPdf(

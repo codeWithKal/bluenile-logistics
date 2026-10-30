@@ -1126,7 +1126,7 @@ export const UsersView: React.FC = () => {
                   required
                   value={createEmail}
                   onChange={(e) => setCreateEmail(e.target.value.toLowerCase())}
-                  placeholder="e.g. dawit@alexlogistics.com"
+                  placeholder="e.g. dawit@abtrading.com"
                   className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded focus:bg-white focus:border-amber-500 focus:outline-hidden"
                 />
               </div>

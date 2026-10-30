@@ -3,6 +3,8 @@ import type { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query, queryOne, execute, transaction, getCloudBackupDiagnostics, forceCloudBackupSync, listCloudBackups, restoreCloudBackup, deleteCloudBackup, pruneMultipleBackupsPerDay } from './db.ts';
+import { runSupabaseMigration } from './supabaseMigration.ts';
+import { syncInsert, syncUpdate, syncDelete, syncUpsert } from './supabaseSync.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sandtrack-secret-key-2026-secure';
 
@@ -103,6 +105,16 @@ export function recordAuditLog(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [auditId, userId || null, userName || 'System', action, entityType, entityId, details, now]
     );
+    syncInsert('audit_logs', {
+      id: auditId,
+      user_id: userId || null,
+      user_name: userName || 'System',
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      details,
+      created_at: now,
+    });
   } catch (err) {
     console.error('Failed to write audit log:', err);
   }
@@ -121,6 +133,16 @@ apiRouter.get('/system/cloud-backup', requireAdmin, async (_req: Request, res: R
   try {
     const diagnostics = await getCloudBackupDiagnostics();
     res.json(diagnostics);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Run Supabase PostgreSQL table migration (Admin Only)
+apiRouter.post('/system/migrate-to-supabase', requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const report = await runSupabaseMigration();
+    res.json(report);
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
   }
@@ -445,6 +467,19 @@ apiRouter.post('/users', requireAdmin, (req: Request, res: Response) => {
     [id, cleanUsername, cleanEmail, password_hash, full_name.trim(), role, avatar_url || null, activeState, now, now]
   );
 
+  syncInsert('users', {
+    id,
+    username: cleanUsername,
+    email: cleanEmail,
+    password_hash,
+    full_name: full_name.trim(),
+    role,
+    avatar_url: avatar_url || null,
+    is_active: Boolean(activeState),
+    created_at: now,
+    updated_at: now,
+  });
+
   recordAuditLog(
     req.user?.id,
     req.user?.full_name,
@@ -526,6 +561,17 @@ apiRouter.put('/users/:id', requireAdmin, (req: Request, res: Response) => {
      WHERE id = ?`,
     [newUsername, newEmail, newFullName, newRole, newAvatar, newPasswordHash, newIsActive, now, id]
   );
+
+  syncUpdate('users', {
+    username: newUsername,
+    email: newEmail,
+    full_name: newFullName,
+    role: newRole,
+    avatar_url: newAvatar,
+    password_hash: newPasswordHash,
+    is_active: Boolean(newIsActive),
+    updated_at: now,
+  }, 'id', id);
 
   const changes: string[] = [];
   if (username && username.trim().toLowerCase() !== target.username) {
@@ -661,6 +707,7 @@ apiRouter.delete('/users/:id', requireAdmin, (req: Request, res: Response) => {
     return res.status(404).json({ error: 'User not found' });
   }
   execute('DELETE FROM users WHERE id = ?', [id]);
+  syncDelete('users', 'id', id);
 
   recordAuditLog(
     req.user?.id,
@@ -798,6 +845,17 @@ apiRouter.post('/trucks', requireDataEntry, (req: Request, res: Response) => {
      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     [id, cleanPlate, owner_name.trim(), cap, owner_phone?.trim() || null, notes?.trim() || null, now, now]
   );
+  syncInsert('trucks', {
+    id,
+    plate_number: cleanPlate,
+    owner_name: owner_name.trim(),
+    capacity_m3: cap,
+    owner_phone: owner_phone?.trim() || null,
+    is_active: true,
+    notes: notes?.trim() || null,
+    created_at: now,
+    updated_at: now,
+  });
 
   return res.status(201).json({ id, plate_number: cleanPlate, owner_name: owner_name.trim(), capacity_m3: cap, is_active: 1 });
 });
@@ -832,6 +890,15 @@ apiRouter.put('/trucks/:id', requireDataEntry, (req: Request, res: Response) => 
      WHERE id = ?`,
     [cleanPlate, owner_name ? owner_name.trim() : truck.owner_name, cap, owner_phone !== undefined ? owner_phone : truck.owner_phone, activeStatus, notes !== undefined ? notes : truck.notes, now, id]
   );
+  syncUpdate('trucks', {
+    plate_number: cleanPlate,
+    owner_name: owner_name ? owner_name.trim() : truck.owner_name,
+    capacity_m3: cap,
+    owner_phone: owner_phone !== undefined ? owner_phone : truck.owner_phone,
+    is_active: Boolean(activeStatus),
+    notes: notes !== undefined ? notes : truck.notes,
+    updated_at: now,
+  }, 'id', id);
 
   return res.json({ success: true, id, plate_number: cleanPlate });
 });
@@ -867,9 +934,11 @@ apiRouter.delete('/trucks/:id', requireDataEntry, (req: Request, res: Response) 
   if (tripCount > 0 && req.query.force === 'true') {
     execute('DELETE FROM trip_status_history WHERE trip_id IN (SELECT id FROM trips WHERE truck_id = ?)', [id]);
     execute('DELETE FROM trips WHERE truck_id = ?', [id]);
+    syncDelete('trips', 'truck_id', id);
   }
 
   execute('DELETE FROM trucks WHERE id = ?', [id]);
+  syncDelete('trucks', 'id', id);
   recordAuditLog(req.user?.id, req.user?.username, 'DELETE_TRUCK', 'truck', id, `Deleted truck ${truck.plate_number} (${truck.owner_name})`);
 
   return res.json({ success: true, message: `Truck ${truck.plate_number} deleted successfully`, id });
@@ -912,6 +981,17 @@ apiRouter.post('/companies', requireDataEntry, (req: Request, res: Response) => 
      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     [id, name.trim(), contact_person?.trim() || null, phone?.trim() || null, address?.trim() || null, notes?.trim() || null, now, now]
   );
+  syncInsert('construction_companies', {
+    id,
+    name: name.trim(),
+    contact_person: contact_person?.trim() || null,
+    phone: phone?.trim() || null,
+    address: address?.trim() || null,
+    notes: notes?.trim() || null,
+    is_active: true,
+    created_at: now,
+    updated_at: now,
+  });
   return res.status(201).json({ id, name: name.trim(), is_active: 1 });
 });
 
@@ -932,6 +1012,15 @@ apiRouter.put('/companies/:id', requireDataEntry, (req: Request, res: Response) 
      WHERE id = ?`,
     [name ? name.trim() : comp.name, contact_person !== undefined ? contact_person : comp.contact_person, phone !== undefined ? phone : comp.phone, address !== undefined ? address : comp.address, activeStatus, notes !== undefined ? notes : comp.notes, now, id]
   );
+  syncUpdate('construction_companies', {
+    name: name ? name.trim() : comp.name,
+    contact_person: contact_person !== undefined ? contact_person : comp.contact_person,
+    phone: phone !== undefined ? phone : comp.phone,
+    address: address !== undefined ? address : comp.address,
+    is_active: Boolean(activeStatus),
+    notes: notes !== undefined ? notes : comp.notes,
+    updated_at: now,
+  }, 'id', id);
   return res.json({ success: true, id });
 });
 
@@ -987,9 +1076,12 @@ apiRouter.delete('/companies/:id', requireDataEntry, (req: Request, res: Respons
     execute('DELETE FROM trips WHERE company_id = ?', [id]);
     execute('UPDATE locations SET associated_company_id = NULL, associated_project_id = NULL WHERE associated_company_id = ?', [id]);
     execute('DELETE FROM projects WHERE company_id = ?', [id]);
+    syncDelete('trips', 'company_id', id);
+    syncDelete('projects', 'company_id', id);
   }
 
   execute('DELETE FROM construction_companies WHERE id = ?', [id]);
+  syncDelete('construction_companies', 'id', id);
   recordAuditLog(req.user?.id, req.user?.username, 'DELETE_COMPANY', 'company', id, `Deleted company ${company.name}`);
 
   return res.json({ success: true, message: `Company ${company.name} deleted successfully`, id });
@@ -1046,6 +1138,22 @@ apiRouter.post('/projects', requireDataEntry, (req: Request, res: Response) => {
       now
     ]
   );
+  syncInsert('projects', {
+    id,
+    name: name.trim(),
+    company_id,
+    address: address?.trim() || null,
+    location_address: address?.trim() || null,
+    latitude: latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null,
+    longitude: longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null,
+    price_sand_00: price_sand_00 !== undefined ? Number(price_sand_00) : 1650,
+    price_sand_01: price_sand_01 !== undefined ? Number(price_sand_01) : 1880,
+    price_sand_02: price_sand_02 !== undefined ? Number(price_sand_02) : 2100,
+    is_active: true,
+    notes: notes?.trim() || null,
+    created_at: now,
+    updated_at: now,
+  });
   return res.status(201).json({ id, name: name.trim(), company_id, is_active: 1 });
 });
 
@@ -1078,6 +1186,19 @@ apiRouter.put('/projects/:id', requireDataEntry, (req: Request, res: Response) =
       id
     ]
   );
+  syncUpdate('projects', {
+    name: name ? name.trim() : proj.name,
+    address: address !== undefined ? address : proj.address,
+    location_address: address !== undefined ? address : proj.address,
+    latitude: latitude !== undefined ? (latitude !== null && latitude !== '' ? Number(latitude) : null) : proj.latitude,
+    longitude: longitude !== undefined ? (longitude !== null && longitude !== '' ? Number(longitude) : null) : proj.longitude,
+    price_sand_00: price_sand_00 !== undefined ? Number(price_sand_00) : (proj.price_sand_00 || 1650),
+    price_sand_01: price_sand_01 !== undefined ? Number(price_sand_01) : (proj.price_sand_01 || 1880),
+    price_sand_02: price_sand_02 !== undefined ? Number(price_sand_02) : (proj.price_sand_02 || 2100),
+    is_active: Boolean(activeStatus),
+    notes: notes !== undefined ? notes : proj.notes,
+    updated_at: now,
+  }, 'id', id);
   return res.json({ success: true, id });
 });
 
@@ -1133,9 +1254,12 @@ apiRouter.delete('/projects/:id', requireDataEntry, (req: Request, res: Response
     execute('DELETE FROM trips WHERE project_id = ? OR unloading_location_id = ?', [id, id]);
     execute('DELETE FROM route_tariffs WHERE destination_location_id = ?', [id]);
     execute('UPDATE locations SET associated_project_id = NULL WHERE associated_project_id = ?', [id]);
+    syncDelete('trips', 'project_id', id);
+    syncDelete('route_tariffs', 'destination_location_id', id);
   }
 
   execute('DELETE FROM projects WHERE id = ?', [id]);
+  syncDelete('projects', 'id', id);
   recordAuditLog(req.user?.id, req.user?.username, 'DELETE_PROJECT', 'project', id, `Deleted project ${project.name}`);
 
   return res.json({ success: true, message: `Project ${project.name} deleted successfully`, id });
@@ -1214,6 +1338,28 @@ apiRouter.post('/locations', requireDataEntry, (req: Request, res: Response) => 
       notes?.trim() || null, now, now
     ]
   );
+  syncInsert('locations', {
+    id,
+    name: name.trim(),
+    location_type,
+    address: address?.trim() || null,
+    associated_company_id: associated_company_id || null,
+    associated_project_id: associated_project_id || null,
+    contact_person: contact_person?.trim() || null,
+    phone: phone?.trim() || null,
+    latitude: latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null,
+    longitude: longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null,
+    price_sand_00: price_sand_00 !== undefined ? Number(price_sand_00) : 920,
+    price_sand_01: price_sand_01 !== undefined ? Number(price_sand_01) : 1050,
+    price_sand_02: price_sand_02 !== undefined ? Number(price_sand_02) : 1180,
+    selling_price_sand_00: selling_price_sand_00 !== undefined ? Number(selling_price_sand_00) : 1650,
+    selling_price_sand_01: selling_price_sand_01 !== undefined ? Number(selling_price_sand_01) : 1880,
+    selling_price_sand_02: selling_price_sand_02 !== undefined ? Number(selling_price_sand_02) : 2100,
+    is_active: true,
+    notes: notes?.trim() || null,
+    created_at: now,
+    updated_at: now,
+  });
   return res.status(201).json({ id, name: name.trim(), location_type, is_active: 1 });
 });
 
@@ -1265,6 +1411,26 @@ apiRouter.put('/locations/:id', requireDataEntry, (req: Request, res: Response) 
       id
     ]
   );
+  syncUpdate('locations', {
+    name: name ? name.trim() : loc.name,
+    location_type: location_type ? location_type : loc.location_type,
+    address: address !== undefined ? address : loc.address,
+    associated_company_id: associated_company_id !== undefined ? associated_company_id : loc.associated_company_id,
+    associated_project_id: associated_project_id !== undefined ? associated_project_id : loc.associated_project_id,
+    contact_person: contact_person !== undefined ? contact_person : loc.contact_person,
+    phone: phone !== undefined ? phone : loc.phone,
+    latitude: latitude !== undefined ? (latitude !== null && latitude !== '' ? Number(latitude) : null) : loc.latitude,
+    longitude: longitude !== undefined ? (longitude !== null && longitude !== '' ? Number(longitude) : null) : loc.longitude,
+    price_sand_00: price_sand_00 !== undefined ? Number(price_sand_00) : loc.price_sand_00,
+    price_sand_01: price_sand_01 !== undefined ? Number(price_sand_01) : loc.price_sand_01,
+    price_sand_02: price_sand_02 !== undefined ? Number(price_sand_02) : loc.price_sand_02,
+    selling_price_sand_00: selling_price_sand_00 !== undefined ? Number(selling_price_sand_00) : loc.selling_price_sand_00,
+    selling_price_sand_01: selling_price_sand_01 !== undefined ? Number(selling_price_sand_01) : loc.selling_price_sand_01,
+    selling_price_sand_02: selling_price_sand_02 !== undefined ? Number(selling_price_sand_02) : loc.selling_price_sand_02,
+    is_active: Boolean(activeStatus),
+    notes: notes !== undefined ? notes : loc.notes,
+    updated_at: now,
+  }, 'id', id);
   return res.json({ success: true, id });
 });
 
@@ -1329,9 +1495,11 @@ apiRouter.delete('/locations/:id', requireDataEntry, (req: Request, res: Respons
     execute('DELETE FROM trip_status_history WHERE trip_id IN (SELECT id FROM trips WHERE loading_location_id = ? OR unloading_location_id = ?)', [id, id]);
     execute('DELETE FROM trips WHERE loading_location_id = ? OR unloading_location_id = ?', [id, id]);
     execute('DELETE FROM route_tariffs WHERE origin_location_id = ? OR destination_location_id = ?', [id, id]);
+    syncDelete('route_tariffs', 'origin_location_id', id);
   }
 
   execute('DELETE FROM locations WHERE id = ?', [id]);
+  syncDelete('locations', 'id', id);
   recordAuditLog(req.user?.id, req.user?.username, 'DELETE_LOCATION', 'location', id, `Deleted location ${location.name} (${location.location_type})`);
 
   return res.json({ success: true, message: `Location ${location.name} deleted successfully`, id });
@@ -1454,6 +1622,11 @@ apiRouter.post('/route-tariffs', requireDataEntry, (req: Request, res: Response)
     tripFee, rateM3, tripFee, notes?.trim() || null, now, now
   ]);
 
+  const activeTariff = queryOne<any>('SELECT * FROM route_tariffs WHERE origin_location_id = ? AND destination_location_id = ?', [origin_location_id, destination_location_id]);
+  if (activeTariff) {
+    syncUpsert('route_tariffs', activeTariff, 'id');
+  }
+
   return res.status(201).json({ success: true, fee_per_trip_etb: tripFee, rate_per_m3_etb: rateM3 });
 });
 
@@ -1492,6 +1665,19 @@ apiRouter.put('/route-tariffs/:id', requireDataEntry, (req: Request, res: Respon
     now, id
   ]);
 
+  syncUpdate('route_tariffs', {
+    origin_location_id: oId,
+    destination_location_id: dId,
+    origin_location_name: oLoc?.name || tariff.origin_location_name,
+    destination_location_name: dName,
+    fee_per_trip_etb: tripFee,
+    fixed_trip_fee_etb: tripFee,
+    rate_per_m3_etb: rateM3,
+    distance_km: distance_km !== undefined ? (distance_km ? Number(distance_km) : null) : tariff.distance_km,
+    notes: notes !== undefined ? notes : tariff.notes,
+    updated_at: now,
+  }, 'id', id);
+
   return res.json({ success: true, id, fee_per_trip_etb: tripFee, rate_per_m3_etb: rateM3 });
 });
 
@@ -1504,6 +1690,7 @@ apiRouter.delete('/route-tariffs/:id', requireDataEntry, (req: Request, res: Res
   }
 
   execute('DELETE FROM route_tariffs WHERE id = ?', [id]);
+  syncDelete('route_tariffs', 'id', id);
   recordAuditLog(req.user?.id, req.user?.username, 'DELETE_ROUTE_TARIFF', 'route_tariff', id, `Deleted route tariff from ${tariff.origin_location_name} to ${tariff.destination_location_name}`);
 
   return res.json({ success: true, message: `Route tariff ${id} deleted successfully`, id });
@@ -1918,6 +2105,20 @@ apiRouter.post('/trips', requireDataEntry, (req: Request, res: Response) => {
       return queryOne('SELECT * FROM trips WHERE id = ?', [tripId]);
     });
 
+    if (created) {
+      syncInsert('trips', created);
+      syncInsert('trip_status_history', {
+        id: `hist_${created.id}_${Date.now()}`,
+        trip_id: created.id,
+        previous_status: null,
+        new_status: created.status,
+        changed_by_user_id: userId,
+        changed_by_user_name: userName,
+        reason: created.status_reason || 'Initial trip registration',
+        created_at: now,
+      });
+    }
+
     return res.status(201).json(created);
   } catch (err: any) {
     console.error('Failed to create trip:', err);
@@ -2172,6 +2373,22 @@ apiRouter.put('/trips/:id', requireDataEntry, (req: Request, res: Response) => {
       return queryOne('SELECT * FROM trips WHERE id = ?', [id]);
     });
 
+    if (updated) {
+      syncUpdate('trips', updated, 'id', id);
+      if (currentTrip.status !== newStatus) {
+        syncInsert('trip_status_history', {
+          id: `hist_${id}_${Date.now()}`,
+          trip_id: id,
+          previous_status: currentTrip.status,
+          new_status: newStatus,
+          changed_by_user_id: userId,
+          changed_by_user_name: userName,
+          reason: status_reason || `Status updated from ${currentTrip.status} to ${newStatus}`,
+          created_at: now,
+        });
+      }
+    }
+
     return res.json(updated);
   } catch (err: any) {
     console.error('Failed to update trip:', err);
@@ -2189,6 +2406,8 @@ apiRouter.delete('/trips/:id', requireDataEntry, (req: Request, res: Response) =
 
   execute('DELETE FROM trip_status_history WHERE trip_id = ?', [id]);
   execute('DELETE FROM trips WHERE id = ?', [id]);
+  syncDelete('trip_status_history', 'trip_id', id);
+  syncDelete('trips', 'id', id);
   recordAuditLog(req.user?.id, req.user?.username, 'DELETE_TRIP', 'trip', id, `Deleted trip ${id} for truck ${trip.truck_plate} (${trip.sand_type}, ${trip.quantity_loaded_m3} m³)`);
 
   return res.json({ success: true, message: `Trip ${id} deleted successfully`, id });

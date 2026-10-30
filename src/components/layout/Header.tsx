@@ -45,9 +45,16 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
         <div className="w-9 h-9 rounded-lg bg-white border border-slate-200/90 p-0.5 flex items-center justify-center shrink-0 shadow-2xs">
           <img
-            src="/ab-trading-logo.jpg"
+            src="/assets/aistudio/Gemini_Generated_Image_7d7e1z7d7e1z7d7e_51707232.jpeg"
             alt="AB Trading Logo"
             className="w-full h-full object-contain"
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (!target.dataset.fallback) {
+                target.dataset.fallback = 'true';
+                target.src = '/ab-trading-logo.jpg';
+              }
+            }}
           />
         </div>
         <div className="min-w-0">

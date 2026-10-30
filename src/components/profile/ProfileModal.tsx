@@ -101,6 +101,30 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
   const [loadingBackup, setLoadingBackup] = useState(false);
   const [syncingBackup, setSyncingBackup] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
+  const [migrationRunning, setMigrationRunning] = useState(false);
+  const [migrationResult, setMigrationResult] = useState<{
+    success: boolean;
+    results: Array<{ table: string; sqliteRows: number; migratedRows: number; success: boolean; error?: string }>;
+    summary: string;
+  } | null>(null);
+
+  const handleRunMigration = async () => {
+    setMigrationRunning(true);
+    setSyncFeedback(null);
+    try {
+      const res = await api.runSupabaseMigration();
+      setMigrationResult(res);
+      if (res.success) {
+        setSyncFeedback({ text: 'All database tables successfully migrated to Supabase PostgreSQL!', isError: false });
+      } else {
+        setSyncFeedback({ text: res.summary, isError: true });
+      }
+    } catch (err: any) {
+      setSyncFeedback({ text: err.message || 'Migration request failed', isError: true });
+    } finally {
+      setMigrationRunning(false);
+    }
+  };
 
   const fetchBackupStatus = async () => {
     setLoadingBackup(true);
@@ -923,6 +947,51 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Supabase PostgreSQL Database Synchronization */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-emerald-400" />
+                    <div>
+                      <div className="font-bold text-slate-200">Supabase PostgreSQL Tables</div>
+                      <div className="text-[10px] text-slate-400">Direct relational database tables on Supabase</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRunMigration}
+                    disabled={migrationRunning}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50 text-[11px]"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${migrationRunning ? 'animate-spin' : ''}`} />
+                    <span>{migrationRunning ? 'Syncing...' : 'Run Table Sync'}</span>
+                  </button>
+                </div>
+
+                {migrationResult && (
+                  <div className="space-y-2 mt-2 pt-2 border-t border-slate-800/80">
+                    <div className="text-[11px] font-medium text-slate-300">
+                      Sync Status: <span className={migrationResult.success ? 'text-emerald-400' : 'text-amber-400'}>{migrationResult.summary}</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px]">
+                      {migrationResult.results.map((r) => (
+                        <div
+                          key={r.table}
+                          className={`p-1.5 rounded border ${
+                            r.success
+                              ? 'bg-emerald-950/30 border-emerald-900/60 text-emerald-300'
+                              : 'bg-amber-950/30 border-amber-900/60 text-amber-300'
+                          }`}
+                        >
+                          <div className="font-mono font-semibold truncate">{r.table}</div>
+                          <div>{r.migratedRows} / {r.sqliteRows} rows</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

@@ -101,9 +101,16 @@ function MainApp() {
         <div className="flex flex-col items-center gap-4 text-center">
           <div className="p-3 bg-white rounded-2xl shadow-xl ring-1 ring-white/10 animate-pulse">
             <img
-              src="/ab-trading-logo.jpg"
+              src="/assets/aistudio/Gemini_Generated_Image_7d7e1z7d7e1z7d7e_51707232.jpeg"
               alt="AB Trading"
               className="h-12 sm:h-14 w-auto object-contain"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (!target.dataset.fallback) {
+                  target.dataset.fallback = 'true';
+                  target.src = '/ab-trading-logo.jpg';
+                }
+              }}
             />
           </div>
           <div className="flex items-center gap-2.5 text-slate-400 font-mono text-xs">

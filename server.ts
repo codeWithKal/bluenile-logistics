@@ -64,6 +64,11 @@ async function startServer() {
     });
   });
 
+  const publicPath = path.resolve(process.cwd(), 'public');
+  if (fs.existsSync(publicPath)) {
+    app.use(express.static(publicPath));
+  }
+
   const isProd = process.env.NODE_ENV === 'production';
   const distPath = path.resolve(process.cwd(), 'dist');
   const distIndex = path.resolve(distPath, 'index.html');
