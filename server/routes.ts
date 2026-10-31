@@ -1303,68 +1303,100 @@ apiRouter.get('/locations', async (req: Request, res: Response) => {
 });
 
 apiRouter.post('/locations', requireDataEntry, (req: Request, res: Response) => {
-  const {
-    name, location_type, address, associated_company_id, associated_project_id,
-    contact_person, phone,
-    latitude, longitude,
-    price_sand_00, price_sand_01, price_sand_02,
-    selling_price_sand_00, selling_price_sand_01, selling_price_sand_02,
-    notes
-  } = req.body;
-  if (!name || !location_type) {
-    return res.status(400).json({ error: 'Location name and location type (Loading, Unloading, Both) are required' });
-  }
-  if (!['Loading', 'Unloading', 'Both'].includes(location_type)) {
-    return res.status(400).json({ error: 'Location type must be Loading, Unloading, or Both' });
-  }
-  const now = new Date().toISOString();
-  const id = `LOC-${Date.now().toString().slice(-4)}`;
-  execute(
-    `INSERT INTO locations (
-      id, name, location_type, address, associated_company_id, associated_project_id,
+  try {
+    const {
+      name, location_type, address, associated_company_id, associated_project_id,
       contact_person, phone,
       latitude, longitude,
       price_sand_00, price_sand_01, price_sand_02,
       selling_price_sand_00, selling_price_sand_01, selling_price_sand_02,
-      is_active, notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-    [
-      id, name.trim(), location_type, address?.trim() || null, associated_company_id || null, associated_project_id || null,
-      contact_person?.trim() || null, phone?.trim() || null,
-      latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null,
-      longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null,
-      price_sand_00 !== undefined ? Number(price_sand_00) : 920,
-      price_sand_01 !== undefined ? Number(price_sand_01) : 1050,
-      price_sand_02 !== undefined ? Number(price_sand_02) : 1180,
-      selling_price_sand_00 !== undefined ? Number(selling_price_sand_00) : 1650,
-      selling_price_sand_01 !== undefined ? Number(selling_price_sand_01) : 1880,
-      selling_price_sand_02 !== undefined ? Number(selling_price_sand_02) : 2100,
-      notes?.trim() || null, now, now
-    ]
-  );
-  syncInsert('locations', {
-    id,
-    name: name.trim(),
-    location_type,
-    address: address?.trim() || null,
-    associated_company_id: associated_company_id || null,
-    associated_project_id: associated_project_id || null,
-    contact_person: contact_person?.trim() || null,
-    phone: phone?.trim() || null,
-    latitude: latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null,
-    longitude: longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null,
-    price_sand_00: price_sand_00 !== undefined ? Number(price_sand_00) : 920,
-    price_sand_01: price_sand_01 !== undefined ? Number(price_sand_01) : 1050,
-    price_sand_02: price_sand_02 !== undefined ? Number(price_sand_02) : 1180,
-    selling_price_sand_00: selling_price_sand_00 !== undefined ? Number(selling_price_sand_00) : 1650,
-    selling_price_sand_01: selling_price_sand_01 !== undefined ? Number(selling_price_sand_01) : 1880,
-    selling_price_sand_02: selling_price_sand_02 !== undefined ? Number(selling_price_sand_02) : 2100,
-    is_active: true,
-    notes: notes?.trim() || null,
-    created_at: now,
-    updated_at: now,
-  });
-  return res.status(201).json({ id, name: name.trim(), location_type, is_active: 1 });
+      notes
+    } = req.body;
+    if (!name || !location_type) {
+      return res.status(400).json({ error: 'Location name and location type (Loading, Unloading, Both) are required' });
+    }
+    if (!['Loading', 'Unloading', 'Both'].includes(location_type)) {
+      return res.status(400).json({ error: 'Location type must be Loading, Unloading, or Both' });
+    }
+    const now = new Date().toISOString();
+
+    let id: string;
+    if (req.body.id && typeof req.body.id === 'string' && req.body.id.trim()) {
+      id = req.body.id.trim();
+    } else if (location_type === 'Loading') {
+      const resMax = queryOne<{ id: string }>(
+        `SELECT id FROM locations WHERE id LIKE 'CRU-%' ORDER BY CAST(SUBSTR(id, 5) AS INTEGER) DESC LIMIT 1`
+      );
+      if (resMax && resMax.id) {
+        const num = parseInt(resMax.id.replace('CRU-', ''), 10);
+        id = `CRU-${String(num + 1).padStart(3, '0')}`;
+      } else {
+        id = `CRU-008`;
+      }
+    } else {
+      id = `LOC-${Date.now().toString().slice(-4)}`;
+    }
+
+    execute(
+      `INSERT INTO locations (
+        id, name, location_type, address, associated_company_id, associated_project_id,
+        contact_person, phone,
+        latitude, longitude,
+        price_sand_00, price_sand_01, price_sand_02,
+        selling_price_sand_00, selling_price_sand_01, selling_price_sand_02,
+        is_active, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+      [
+        id, name.trim(), location_type, address?.trim() || null, associated_company_id || null, associated_project_id || null,
+        contact_person?.trim() || null, phone?.trim() || null,
+        latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null,
+        longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null,
+        price_sand_00 !== undefined ? Number(price_sand_00) : 920,
+        price_sand_01 !== undefined ? Number(price_sand_01) : 1050,
+        price_sand_02 !== undefined ? Number(price_sand_02) : 1180,
+        selling_price_sand_00 !== undefined ? Number(selling_price_sand_00) : 1650,
+        selling_price_sand_01 !== undefined ? Number(selling_price_sand_01) : 1880,
+        selling_price_sand_02 !== undefined ? Number(selling_price_sand_02) : 2100,
+        notes?.trim() || null, now, now
+      ]
+    );
+    syncInsert('locations', {
+      id,
+      name: name.trim(),
+      location_type,
+      address: address?.trim() || null,
+      associated_company_id: associated_company_id || null,
+      associated_project_id: associated_project_id || null,
+      contact_person: contact_person?.trim() || null,
+      phone: phone?.trim() || null,
+      latitude: latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null,
+      longitude: longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null,
+      price_sand_00: price_sand_00 !== undefined ? Number(price_sand_00) : 920,
+      price_sand_01: price_sand_01 !== undefined ? Number(price_sand_01) : 1050,
+      price_sand_02: price_sand_02 !== undefined ? Number(price_sand_02) : 1180,
+      selling_price_sand_00: selling_price_sand_00 !== undefined ? Number(selling_price_sand_00) : 1650,
+      selling_price_sand_01: selling_price_sand_01 !== undefined ? Number(selling_price_sand_01) : 1880,
+      selling_price_sand_02: selling_price_sand_02 !== undefined ? Number(selling_price_sand_02) : 2100,
+      is_active: true,
+      notes: notes?.trim() || null,
+      created_at: now,
+      updated_at: now,
+    });
+
+    recordAuditLog(
+      req.user?.id,
+      req.user?.username || req.user?.full_name,
+      'CREATE_LOCATION',
+      'location',
+      id,
+      `Registered new ${location_type === 'Loading' ? 'crusher loading plant' : 'location'} "${name.trim()}" (${id})`
+    );
+
+    return res.status(201).json({ id, name: name.trim(), location_type, is_active: 1 });
+  } catch (err: any) {
+    console.error('Error in POST /locations:', err);
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message || String(err) });
+  }
 });
 
 apiRouter.put('/locations/:id', requireDataEntry, (req: Request, res: Response) => {

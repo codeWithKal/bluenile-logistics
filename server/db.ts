@@ -898,6 +898,16 @@ function createTables() {
       address TEXT,
       associated_company_id TEXT REFERENCES construction_companies(id),
       associated_project_id TEXT REFERENCES projects(id),
+      contact_person TEXT,
+      phone TEXT,
+      price_sand_00 REAL DEFAULT 920,
+      price_sand_01 REAL DEFAULT 1050,
+      price_sand_02 REAL DEFAULT 1180,
+      selling_price_sand_00 REAL DEFAULT 1650,
+      selling_price_sand_01 REAL DEFAULT 1880,
+      selling_price_sand_02 REAL DEFAULT 2100,
+      latitude REAL,
+      longitude REAL,
       is_active INTEGER NOT NULL DEFAULT 1,
       notes TEXT,
       created_at TEXT NOT NULL,
@@ -1482,6 +1492,22 @@ export function transaction<T>(fn: () => T): T {
 function migrateCrusherLocations() {
   if (!db) return;
   try {
+    const locCols = (db.exec('PRAGMA table_info(locations)')[0]?.values || []).map((v: any[]) => v[1]);
+    if (!locCols.includes('contact_person')) {
+      db.run('ALTER TABLE locations ADD COLUMN contact_person TEXT');
+    }
+    if (!locCols.includes('phone')) {
+      db.run('ALTER TABLE locations ADD COLUMN phone TEXT');
+    }
+    if (!locCols.includes('price_sand_00')) db.run('ALTER TABLE locations ADD COLUMN price_sand_00 REAL DEFAULT 920');
+    if (!locCols.includes('price_sand_01')) db.run('ALTER TABLE locations ADD COLUMN price_sand_01 REAL DEFAULT 1050');
+    if (!locCols.includes('price_sand_02')) db.run('ALTER TABLE locations ADD COLUMN price_sand_02 REAL DEFAULT 1180');
+    if (!locCols.includes('selling_price_sand_00')) db.run('ALTER TABLE locations ADD COLUMN selling_price_sand_00 REAL DEFAULT 1650');
+    if (!locCols.includes('selling_price_sand_01')) db.run('ALTER TABLE locations ADD COLUMN selling_price_sand_01 REAL DEFAULT 1880');
+    if (!locCols.includes('selling_price_sand_02')) db.run('ALTER TABLE locations ADD COLUMN selling_price_sand_02 REAL DEFAULT 2100');
+    if (!locCols.includes('latitude')) db.run('ALTER TABLE locations ADD COLUMN latitude REAL');
+    if (!locCols.includes('longitude')) db.run('ALTER TABLE locations ADD COLUMN longitude REAL');
+
     db.run(`
       UPDATE locations SET name = 'Red River Sand Crusher Plant #1', notes = 'Primary industrial crusher plant for fine grades 00 and 01 sand' WHERE id = 'LOC-001';
       UPDATE locations SET name = 'Trinity Basin Sand Crusher Depot', notes = 'Rotary crusher and wash plant for coarse aggregate grade 02' WHERE id = 'LOC-002';
