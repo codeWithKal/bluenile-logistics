@@ -2222,7 +2222,19 @@ apiRouter.put('/trips/:id', requireDataEntry, (req: Request, res: Response) => {
   const loadingLocId = loading_location_id || currentTrip.loading_location_id;
   const loadingLoc = queryOne<any>('SELECT * FROM locations WHERE id = ?', [loadingLocId]);
   const unloadingLocId = unloading_location_id || currentTrip.unloading_location_id;
-  const unloadingLoc = queryOne<any>('SELECT * FROM locations WHERE id = ?', [unloadingLocId]);
+  let unloadingLoc = queryOne<any>('SELECT * FROM locations WHERE id = ?', [unloadingLocId]);
+  if (!unloadingLoc && unloadingLocId) {
+    const proj = queryOne<any>('SELECT * FROM projects WHERE id = ?', [unloadingLocId]);
+    if (proj) {
+      unloadingLoc = {
+        id: proj.id,
+        name: proj.name,
+        address: proj.address,
+        associated_company_id: proj.company_id,
+        associated_project_id: proj.id
+      };
+    }
+  }
 
   const customUnitCost = req.body.unit_cost_etb;
   const customUnitPrice = req.body.unit_price_etb;

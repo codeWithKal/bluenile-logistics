@@ -812,6 +812,7 @@ export async function initDb() {
   migrateFinancialColumns();
   migrateRouteTransportFees();
   migrateCrusherOnlyAndProjectDestinations();
+  migrateFixLocationForeignKeys();
 
   // Primary source of truth: Load live state from Supabase PostgreSQL tables!
   const hydratedFromSupabase = await loadAllFromSupabasePostgres();
@@ -919,7 +920,7 @@ function createTables() {
       sand_type TEXT NOT NULL CHECK(sand_type IN ('00', '01', '02')),
       quantity_loaded_m3 REAL NOT NULL CHECK(quantity_loaded_m3 >= 0),
       loading_notes TEXT,
-      unloading_location_id TEXT NOT NULL REFERENCES locations(id),
+      unloading_location_id TEXT NOT NULL,
       unloading_location_name TEXT NOT NULL,
       unloading_datetime TEXT,
       quantity_delivered_m3 REAL NOT NULL DEFAULT 0 CHECK(quantity_delivered_m3 >= 0),
@@ -1678,7 +1679,7 @@ function migrateRouteTransportFees() {
       CREATE TABLE IF NOT EXISTS route_tariffs (
         id TEXT PRIMARY KEY,
         origin_location_id TEXT NOT NULL REFERENCES locations(id),
-        destination_location_id TEXT NOT NULL REFERENCES locations(id),
+        destination_location_id TEXT NOT NULL,
         origin_location_name TEXT,
         destination_location_name TEXT,
         distance_km REAL,
@@ -2118,5 +2119,123 @@ export function migrateCleanRouteTariffs() {
     console.error('migrateCleanRouteTariffs error:', err);
   }
 }
+
+export function migrateFixLocationForeignKeys() {
+  if (!db) return;
+  try {
+    // 1. Check trips foreign keys
+    const tripsFkInfo = db.exec('PRAGMA foreign_key_list(trips)')[0]?.values || [];
+    const hasTripsUnloadingFk = tripsFkInfo.some(
+      (fk: any[]) => fk[2] === 'locations' && fk[3] === 'unloading_location_id'
+    );
+
+    if (hasTripsUnloadingFk) {
+      console.log('[Migration] Removing invalid foreign key constraint on trips.unloading_location_id...');
+      db.run('PRAGMA foreign_keys = OFF;');
+
+      const existingColsRes = db.exec('PRAGMA table_info(trips)')[0]?.values || [];
+      const existingCols = existingColsRes.map((c: any[]) => c[1]);
+
+      db.run(`
+        CREATE TABLE trips_new (
+          id TEXT PRIMARY KEY,
+          trip_date TEXT NOT NULL,
+          truck_id TEXT NOT NULL REFERENCES trucks(id),
+          truck_plate TEXT NOT NULL,
+          truck_owner TEXT NOT NULL,
+          company_id TEXT NOT NULL REFERENCES construction_companies(id),
+          company_name TEXT NOT NULL,
+          project_id TEXT REFERENCES projects(id),
+          project_name TEXT,
+          loading_location_id TEXT NOT NULL REFERENCES locations(id),
+          loading_location_name TEXT NOT NULL,
+          loading_datetime TEXT,
+          sand_type TEXT NOT NULL CHECK(sand_type IN ('00', '01', '02')),
+          quantity_loaded_m3 REAL NOT NULL CHECK(quantity_loaded_m3 >= 0),
+          loading_notes TEXT,
+          unloading_location_id TEXT NOT NULL,
+          unloading_location_name TEXT NOT NULL,
+          unloading_datetime TEXT,
+          quantity_delivered_m3 REAL NOT NULL DEFAULT 0 CHECK(quantity_delivered_m3 >= 0),
+          quantity_remaining_m3 REAL NOT NULL DEFAULT 0,
+          delivery_outcome TEXT,
+          delivery_proof_ref TEXT,
+          unloading_notes TEXT,
+          status TEXT NOT NULL CHECK(status IN ('Registered', 'Loading', 'Loaded / In Transit', 'Delivered', 'Partially Delivered', 'Unsuccessful', 'Cancelled')),
+          status_reason TEXT,
+          capacity_warning_acknowledged INTEGER DEFAULT 0,
+          unit_cost_etb REAL DEFAULT 0,
+          total_cost_etb REAL DEFAULT 0,
+          unit_price_etb REAL DEFAULT 0,
+          total_revenue_etb REAL DEFAULT 0,
+          gross_profit_etb REAL DEFAULT 0,
+          shortage_loss_etb REAL DEFAULT 0,
+          transport_rate_etb_per_m3 REAL DEFAULT 8500,
+          total_transport_fee_etb REAL DEFAULT 8500,
+          route_tariff_id TEXT,
+          created_by_user_id TEXT,
+          created_by_user_name TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+
+      const newColsRes = db.exec('PRAGMA table_info(trips_new)')[0]?.values || [];
+      const newColsSet = new Set(newColsRes.map((c: any[]) => c[1]));
+      const sharedCols = existingCols.filter((col: string) => newColsSet.has(col)).join(', ');
+
+      db.run(`INSERT INTO trips_new (${sharedCols}) SELECT ${sharedCols} FROM trips;`);
+      db.run('DROP TABLE trips;');
+      db.run('ALTER TABLE trips_new RENAME TO trips;');
+      db.run('PRAGMA foreign_keys = ON;');
+      console.log('[Migration] Cleaned trips table schema successfully.');
+    }
+
+    // 2. Check route_tariffs foreign keys
+    const tariffFkInfo = db.exec('PRAGMA foreign_key_list(route_tariffs)')[0]?.values || [];
+    const hasTariffDestFk = tariffFkInfo.some(
+      (fk: any[]) => fk[2] === 'locations' && fk[3] === 'destination_location_id'
+    );
+
+    if (hasTariffDestFk) {
+      console.log('[Migration] Removing invalid foreign key constraint on route_tariffs.destination_location_id...');
+      db.run('PRAGMA foreign_keys = OFF;');
+
+      const existingTariffColsRes = db.exec('PRAGMA table_info(route_tariffs)')[0]?.values || [];
+      const existingTariffCols = existingTariffColsRes.map((c: any[]) => c[1]);
+
+      db.run(`
+        CREATE TABLE route_tariffs_new (
+          id TEXT PRIMARY KEY,
+          origin_location_id TEXT NOT NULL REFERENCES locations(id),
+          destination_location_id TEXT NOT NULL,
+          origin_location_name TEXT,
+          destination_location_name TEXT,
+          distance_km REAL,
+          fee_per_trip_etb REAL NOT NULL DEFAULT 8500,
+          rate_per_m3_etb REAL NOT NULL DEFAULT 450,
+          fixed_trip_fee_etb REAL DEFAULT 0,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(origin_location_id, destination_location_id)
+        );
+      `);
+
+      const newTariffColsRes = db.exec('PRAGMA table_info(route_tariffs_new)')[0]?.values || [];
+      const newTariffColsSet = new Set(newTariffColsRes.map((c: any[]) => c[1]));
+      const sharedTariffCols = existingTariffCols.filter((col: string) => newTariffColsSet.has(col)).join(', ');
+
+      db.run(`INSERT INTO route_tariffs_new (${sharedTariffCols}) SELECT ${sharedTariffCols} FROM route_tariffs;`);
+      db.run('DROP TABLE route_tariffs;');
+      db.run('ALTER TABLE route_tariffs_new RENAME TO route_tariffs;');
+      db.run('PRAGMA foreign_keys = ON;');
+      console.log('[Migration] Cleaned route_tariffs table schema successfully.');
+    }
+  } catch (err) {
+    console.error('migrateFixLocationForeignKeys error:', err);
+  }
+}
+
 
 
