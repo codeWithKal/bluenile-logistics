@@ -2,7 +2,7 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { query, queryOne, execute, transaction, getCloudBackupDiagnostics, forceCloudBackupSync, listCloudBackups, restoreCloudBackup, deleteCloudBackup, pruneMultipleBackupsPerDay } from './db.ts';
+import { query, queryOne, execute, transaction, syncTableFromSupabase, getCloudBackupDiagnostics, forceCloudBackupSync, listCloudBackups, restoreCloudBackup, deleteCloudBackup, pruneMultipleBackupsPerDay } from './db.ts';
 import { runSupabaseMigration } from './supabaseMigration.ts';
 import { syncInsert, syncUpdate, syncDelete, syncUpsert } from './supabaseSync.ts';
 
@@ -791,7 +791,8 @@ apiRouter.get('/audit-logs', requireAdmin, (req: Request, res: Response) => {
 // ==========================================
 
 // List trucks with trip counts & delivered stats
-apiRouter.get('/trucks', (_req: Request, res: Response) => {
+apiRouter.get('/trucks', async (_req: Request, res: Response) => {
+  await syncTableFromSupabase('trucks');
   const trucks = query<any>(`
     SELECT t.*,
       COUNT(tr.id) as total_trips,
@@ -949,7 +950,8 @@ apiRouter.delete('/trucks/:id', requireDataEntry, (req: Request, res: Response) 
 // ==========================================
 
 // List companies
-apiRouter.get('/companies', (_req: Request, res: Response) => {
+apiRouter.get('/companies', async (_req: Request, res: Response) => {
+  await syncTableFromSupabase('construction_companies');
   const companies = query<any>(`
     SELECT c.*,
       COUNT(DISTINCT p.id) as project_count,
@@ -1088,7 +1090,8 @@ apiRouter.delete('/companies/:id', requireDataEntry, (req: Request, res: Respons
 });
 
 // List projects
-apiRouter.get('/projects', (req: Request, res: Response) => {
+apiRouter.get('/projects', async (req: Request, res: Response) => {
+  await syncTableFromSupabase('projects');
   const { company_id } = req.query;
   let sql = `
     SELECT p.*, c.name as company_name,
@@ -1269,7 +1272,8 @@ apiRouter.delete('/projects/:id', requireDataEntry, (req: Request, res: Response
 // LOCATIONS (CRUSHER SITES & JOBSITE DESTINATIONS)
 // ==========================================
 
-apiRouter.get('/locations', (req: Request, res: Response) => {
+apiRouter.get('/locations', async (req: Request, res: Response) => {
+  await syncTableFromSupabase('locations');
   const { type, active_only } = req.query;
   let sql = `
     SELECT l.*,
@@ -1510,7 +1514,8 @@ apiRouter.delete('/locations/:id', requireDataEntry, (req: Request, res: Respons
 // ROUTE TRANSPORT TARIFFS (FIXED ROUTE FEES PER TRIP)
 // ==========================================
 
-apiRouter.get('/route-tariffs', (_req: Request, res: Response) => {
+apiRouter.get('/route-tariffs', async (_req: Request, res: Response) => {
+  await syncTableFromSupabase('route_tariffs');
   const tariffs = query<any>(`
     SELECT rt.*,
       COALESCE(rt.fee_per_trip_etb, rt.fixed_trip_fee_etb, rt.rate_per_m3_etb * 20, 8500) as fee_per_trip_etb,
@@ -1537,7 +1542,8 @@ apiRouter.get('/route-tariffs', (_req: Request, res: Response) => {
   return res.json(tariffs);
 });
 
-apiRouter.get('/route-tariffs/lookup', (req: Request, res: Response) => {
+apiRouter.get('/route-tariffs/lookup', async (req: Request, res: Response) => {
+  await syncTableFromSupabase('route_tariffs');
   const { origin_id, destination_id } = req.query;
   if (!origin_id || !destination_id) {
     return res.status(400).json({ error: 'origin_id and destination_id required' });
@@ -1734,7 +1740,9 @@ apiRouter.post('/trips/check-duplicate', (req: Request, res: Response) => {
 });
 
 // List trips with extensive filtering and pagination
-apiRouter.get('/trips', (req: Request, res: Response) => {
+apiRouter.get('/trips', async (req: Request, res: Response) => {
+  await syncTableFromSupabase('trips');
+  await syncTableFromSupabase('trip_status_history');
   const {
     start_date,
     end_date,
@@ -2417,7 +2425,8 @@ apiRouter.delete('/trips/:id', requireDataEntry, (req: Request, res: Response) =
 // DASHBOARD ANALYTICS
 // ==========================================
 
-apiRouter.get('/analytics/dashboard', (req: Request, res: Response) => {
+apiRouter.get('/analytics/dashboard', async (req: Request, res: Response) => {
+  await syncTableFromSupabase('trips');
   const {
     start_date,
     end_date,

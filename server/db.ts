@@ -696,39 +696,26 @@ export async function restoreCloudBackup(backupName: string): Promise<{ success:
 
 let SQL: SqlJsStatic;
 let db: Database;
+const lastTableSync: Record<string, number> = {};
 
-export async function loadAllFromSupabasePostgres(): Promise<boolean> {
+export async function syncTableFromSupabase(tableName: string, force = false): Promise<number> {
+  if (!db) return 0;
+  const now = Date.now();
+  if (!force && lastTableSync[tableName] && (now - lastTableSync[tableName] < 2000)) {
+    const countRes = db.exec(`SELECT COUNT(*) as c FROM ${tableName}`)[0]?.values[0]?.[0];
+    return Number(countRes || 0);
+  }
+
   try {
-    const users = await fetchAllFromSupabase('users');
-    if (!users || users.length === 0) {
-      console.log('[Supabase PostgreSQL] No users in cloud database yet, using initial seed.');
-      return false;
-    }
+    const rows = await fetchAllFromSupabase(tableName);
+    const tableCols = (db.exec(`PRAGMA table_info(${tableName})`)[0]?.values || []).map((v: any[]) => v[1]);
+    const validColSet = new Set(tableCols);
 
-    console.log(`[Supabase PostgreSQL] Hydrating system directly from cloud database tables...`);
     db.run('PRAGMA foreign_keys = OFF;');
+    db.run(`DELETE FROM ${tableName};`);
+    lastTableSync[tableName] = now;
 
-    const tables = [
-      'users',
-      'trucks',
-      'construction_companies',
-      'locations',
-      'projects',
-      'route_tariffs',
-      'trips',
-      'trip_status_history',
-      'audit_logs',
-    ];
-
-    for (const tableName of tables) {
-      const rows = tableName === 'users' ? users : await fetchAllFromSupabase(tableName);
-      if (!rows || rows.length === 0) continue;
-
-      const tableCols = (db.exec(`PRAGMA table_info(${tableName})`)[0]?.values || []).map((v: any[]) => v[1]);
-      const validColSet = new Set(tableCols);
-
-      db.run(`DELETE FROM ${tableName};`);
-
+    if (rows && rows.length > 0) {
       for (const row of rows) {
         const cols: string[] = [];
         const placeholders: string[] = [];
@@ -752,13 +739,47 @@ export async function loadAllFromSupabasePostgres(): Promise<boolean> {
             `INSERT OR REPLACE INTO ${tableName} (${cols.join(', ')}) VALUES (${placeholders.join(', ')})`,
             values
           );
-        } catch (insertErr: any) {
-          console.warn(`[Supabase PostgreSQL] Hydration insert error on ${tableName}:`, insertErr.message);
+        } catch (_insertErr: any) {
+          // Ignore
         }
       }
     }
 
     db.run('PRAGMA foreign_keys = ON;');
+    return rows ? rows.length : 0;
+  } catch (err: any) {
+    console.warn(`[Supabase Sync] Failed to sync ${tableName}:`, err.message || err);
+    return -1;
+  }
+}
+
+export async function loadAllFromSupabasePostgres(): Promise<boolean> {
+  try {
+    const users = await fetchAllFromSupabase('users');
+    if (!users || users.length === 0) {
+      console.log('[Supabase PostgreSQL] No users in cloud database yet, using initial seed.');
+      return false;
+    }
+
+    console.log(`[Supabase PostgreSQL] Hydrating system directly from cloud database tables...`);
+
+    const tables = [
+      'users',
+      'trucks',
+      'construction_companies',
+      'locations',
+      'projects',
+      'route_tariffs',
+      'trips',
+      'trip_status_history',
+      'audit_logs',
+    ];
+
+    for (const tableName of tables) {
+      const count = await syncTableFromSupabase(tableName);
+      console.log(`[Supabase PostgreSQL] Hydrated ${count} rows for "${tableName}".`);
+    }
+
     console.log('[Supabase PostgreSQL] System successfully hydrated from cloud database.');
     return true;
   } catch (err: any) {
@@ -1688,47 +1709,7 @@ function migrateRouteTransportFees() {
       db.run('ALTER TABLE trips ADD COLUMN route_tariff_id TEXT');
     }
 
-    const now = new Date().toISOString();
-
-    // Clean up any route tariffs where origin is not a crusher loading plant
-    db.run("DELETE FROM route_tariffs WHERE origin_location_id NOT IN ('LOC-001', 'LOC-002', 'LOC-003')");
-
-    // 4. Pre-seed fixed routes tariffs STRICTLY from Crusher Plants (Loading Origins) to Destination Projects (Unloading)
-    const routesConfig = [
-      // From LOC-001: Red River Sand Crusher Plant #1
-      { id: 'RT-001', oId: 'LOC-001', oName: 'Red River Sand Crusher Plant #1', dId: 'LOC-004', dName: 'HWY 35 Interchange Destination Project (Pier 7)', km: 34, tripFee: 9500, notes: 'Direct corridor via Northway Expressway' },
-      { id: 'RT-002', oId: 'LOC-001', oName: 'Red River Sand Crusher Plant #1', dId: 'LOC-005', dName: 'Gateway Logistics Destination Project Phase 2', km: 42, tripFee: 11000, notes: 'Industrial park perimeter haul' },
-      { id: 'RT-003', oId: 'LOC-001', oName: 'Red River Sand Crusher Plant #1', dId: 'LOC-006', dName: 'Oakridge Estates Sector 4 Destination Project', km: 28, tripFee: 8500, notes: 'Suburban access route' },
-      { id: 'RT-004', oId: 'LOC-001', oName: 'Red River Sand Crusher Plant #1', dId: 'LOC-007', dName: 'Keystone Concrete Destination Project & Silos', km: 38, tripFee: 10500, notes: 'Heavy axle route to quarry silos' },
-      { id: 'RT-005', oId: 'LOC-001', oName: 'Red River Sand Crusher Plant #1', dId: 'LOC-008', dName: 'Regional Municipal Stockpile Yard', km: 30, tripFee: 9000, notes: 'Loop transit to public works depot' },
-
-      // From LOC-002: Trinity Basin Sand Crusher Depot
-      { id: 'RT-006', oId: 'LOC-002', oName: 'Trinity Basin Sand Crusher Depot', dId: 'LOC-004', dName: 'HWY 35 Interchange Destination Project (Pier 7)', km: 46, tripFee: 11500, notes: 'Cross-basin haulage' },
-      { id: 'RT-007', oId: 'LOC-002', oName: 'Trinity Basin Sand Crusher Depot', dId: 'LOC-005', dName: 'Gateway Logistics Destination Project Phase 2', km: 26, tripFee: 8000, notes: 'Short corridor to Gateway Phase 2' },
-      { id: 'RT-008', oId: 'LOC-002', oName: 'Trinity Basin Sand Crusher Depot', dId: 'LOC-006', dName: 'Oakridge Estates Sector 4 Destination Project', km: 55, tripFee: 12500, notes: 'Long-haul residential delivery' },
-      { id: 'RT-009', oId: 'LOC-002', oName: 'Trinity Basin Sand Crusher Depot', dId: 'LOC-007', dName: 'Keystone Concrete Destination Project & Silos', km: 22, tripFee: 7500, notes: 'Direct connecting bypass' },
-      { id: 'RT-010', oId: 'LOC-002', oName: 'Trinity Basin Sand Crusher Depot', dId: 'LOC-008', dName: 'Regional Municipal Stockpile Yard', km: 35, tripFee: 9500, notes: 'Standard municipal feed' },
-
-      // From LOC-003: Clear Creek Quarry & Crusher Terminal
-      { id: 'RT-011', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-004', dName: 'HWY 35 Interchange Destination Project (Pier 7)', km: 24, tripFee: 7800, notes: 'South bypass quick transfer' },
-      { id: 'RT-012', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-005', dName: 'Gateway Logistics Destination Project Phase 2', km: 39, tripFee: 10200, notes: 'East loop logistics access' },
-      { id: 'RT-013', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-006', dName: 'Oakridge Estates Sector 4 Destination Project', km: 18, tripFee: 6500, notes: 'Adjacent residential feeder route' },
-      { id: 'RT-014', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-007', dName: 'Keystone Concrete Destination Project & Silos', km: 31, tripFee: 9000, notes: 'Commercial aggregate transit' },
-      { id: 'RT-015', oId: 'LOC-003', oName: 'Clear Creek Quarry & Crusher Terminal', dId: 'LOC-008', dName: 'Regional Municipal Stockpile Yard', km: 21, tripFee: 7200, notes: 'Airport perimeter corridor' }
-    ];
-
-    for (const r of routesConfig) {
-      db.run(`
-        INSERT OR REPLACE INTO route_tariffs (
-          id, origin_location_id, destination_location_id,
-          origin_location_name, destination_location_name,
-          distance_km, fee_per_trip_etb, rate_per_m3_etb, fixed_trip_fee_etb,
-          notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [r.id, r.oId, r.dId, r.oName, r.dName, r.km, r.tripFee, Math.round(r.tripFee / 20), r.tripFee, r.notes, now, now]);
-    }
-
-    // 5. Backfill trips with the route fixed fee per trip
+    // 5. Backfill trips with the route fixed fee per trip if any exist
     const trips = query<any>('SELECT id, loading_location_id, unloading_location_id, status FROM trips');
     for (const t of trips) {
       const tariff = queryOne<any>(
@@ -2133,52 +2114,6 @@ export function migrateCleanRouteTariffs() {
            AND destination_location_id NOT IN (SELECT id FROM locations WHERE location_type IN ('Unloading', 'Both'))
          );
     `);
-
-    // 2. Also ensure each Crusher Site (Loading Origin) has route tariffs connecting to Destination Projects
-    const crushers = query<any>("SELECT id, name, latitude, longitude FROM locations WHERE location_type IN ('Loading', 'Both')");
-    const projects = query<any>("SELECT id, name, latitude, longitude FROM projects");
-    const now = new Date().toISOString();
-
-    if (crushers.length > 0 && projects.length > 0) {
-      let counter = 0;
-      for (const cr of crushers) {
-        for (const pr of projects) {
-          counter++;
-          const existing = queryOne<any>(
-            'SELECT id FROM route_tariffs WHERE origin_location_id = ? AND destination_location_id = ?',
-            [cr.id, pr.id]
-          );
-          if (!existing) {
-            const R = 6371;
-            const cLat = cr.latitude || 9.05;
-            const cLng = cr.longitude || 38.75;
-            const pLat = pr.latitude || 9.00;
-            const pLng = pr.longitude || 38.78;
-            const dLat = ((pLat - cLat) * Math.PI) / 180;
-            const dLon = ((pLng - cLng) * Math.PI) / 180;
-            const a = Math.sin(dLat / 2) ** 2 + Math.cos((cLat * Math.PI) / 180) * Math.cos((pLat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-            const straightKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            const roadKm = Math.max(14, Math.round(straightKm * 1.25));
-
-            const rawFee = 5500 + roadKm * 115;
-            const tripFee = Math.round(rawFee / 250) * 250;
-            const tId = `RT-${Date.now().toString().slice(-4)}${String(counter).padStart(3, '0')}`;
-
-            db.run(
-              `INSERT INTO route_tariffs (
-                id, origin_location_id, destination_location_id,
-                origin_location_name, destination_location_name,
-                distance_km, fee_per_trip_etb, rate_per_m3_etb, fixed_trip_fee_etb,
-                notes, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [tId, cr.id, pr.id, cr.name, pr.name, roadKm, tripFee, Math.round(tripFee / 20), tripFee, `Corridor: ${cr.name} → ${pr.name}`, now, now]
-            );
-          }
-        }
-      }
-    }
-
-    saveDb();
   } catch (err) {
     console.error('migrateCleanRouteTariffs error:', err);
   }
